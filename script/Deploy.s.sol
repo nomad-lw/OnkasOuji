@@ -8,6 +8,8 @@ import {TestNFT} from "../src/TestERC721.sol";
 
 address constant ENTROPY = 0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb;
 address constant PROVIDER = 0x6CC14824Ea2918f5De5C2f75A9Da968ad4BD6344;
+address constant TOKEN = 0x9Ff1df75E883Feda565359545F63095fb710d47f;
+address constant NFT = 0x1cbF8779107A7a2f54019A9230D73CAAB1A38C19;
 
 contract DeployScript is Script {
     function run() external returns (OnkasOujiGame, TestERC20, TestNFT) {
@@ -18,7 +20,7 @@ contract DeployScript is Script {
         // Deploy contracts
         TestERC20 testToken = new TestERC20();
         TestNFT testNFT = new TestNFT();
-        OnkasOujiGame game = new OnkasOujiGame(address(testNFT), address(testToken), address(ENTROPY), address(PROVIDER), address(vm.addr(marketing)));
+        OnkasOujiGame game = new OnkasOujiGame(address(NFT), address(TOKEN), address(ENTROPY), address(PROVIDER), address(vm.addr(marketing)));
 
         vm.stopBroadcast();
 

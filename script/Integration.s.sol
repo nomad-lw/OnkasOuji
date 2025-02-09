@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import {SetupScript} from "./Setup.s.sol";
 import {console} from "forge-std/console.sol";
-import {Player, GameData, TEST_GAMETYPES, GameState} from "../src/lib/models.sol";
+import {Player, GameData, TestGameTypes, GameStatus} from "../src/lib/models.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -12,7 +12,7 @@ contract IntegrationScript is SetupScript {
     uint256 constant STANDARD_GAME_AMOUNT = 100 ether;
     uint256 constant STANDARD_BET_AMOUNT = 50 ether;
 
-    event GameStateChanged(uint256 gameId, GameState state);
+    event GameStateChanged(uint256 gameId, GameStatus state);
 
     function run() public override {
         super.run();
@@ -37,9 +37,9 @@ contract IntegrationScript is SetupScript {
         console.log("Creating basic game...");
         uint256 gameId = createBasicGame();
         GameData memory game = mainContract.get_game(gameId);
-        assert(game.state == GameState.OPEN);
+        assert(game.status == GameStatus.OPEN);
         console.log("Game created successfully with ID:", gameId);
-        console.log("Game state:", uint256(game.state));
+        console.log("Game state:", uint256(game.status));
         console.log("Game amount:", _to_token_str(game.amount), "tGOLD");
 
         vm.stopBroadcast();
@@ -113,8 +113,8 @@ contract IntegrationScript is SetupScript {
     //     mainContract.start_game{value: 0.1 ether}(gameId);
 
     //     GameData memory game = mainContract.get_game(gameId);
-    //     console.log("Game state after start:", uint(game.state));
-    //     assert(game.state == GameState.ACTIVE);
+    //     console.log("Game state after start:", uint(game.status));
+    //     assert(game.status == GameStatus.ACTIVE);
 
     //     vm.stopBroadcast();
     //     console.log("SUCCESS Game Flow test passed");
@@ -152,8 +152,8 @@ contract IntegrationScript is SetupScript {
     //     // Check game completion
     //     vm.startBroadcast(deployer);
     //     GameData memory game = mainContract.get_game(gameId);
-    //     console.log("Game state after entropy:", uint256(game.state));
-    //     assert(game.state == GameState.COMPLETED);
+    //     console.log("Game state after entropy:", uint256(game.status));
+    //     assert(game.status == GameStatus.COMPLETED);
 
     //     // Check winner payouts
     //     uint256 bettor1FinalBalance = testToken.balanceOf(bettor1);
@@ -198,8 +198,8 @@ contract IntegrationScript is SetupScript {
         mainContract.start_game{value: 0.1 ether}(gameId);
 
         GameData memory game = mainContract.get_game(gameId);
-        console.log("Game state after start:", uint256(game.state));
-        assert(game.state == GameState.ACTIVE);
+        console.log("Game state after start:", uint256(game.status));
+        assert(game.status == GameStatus.ACTIVE);
 
         console.log("Game started successfully - waiting for external entropy callback...");
         console.log("Game ID for manual verification:", gameId);
@@ -272,7 +272,7 @@ contract IntegrationScript is SetupScript {
         assert(finalBalance == initialBettorBalance + STANDARD_BET_AMOUNT);
 
         GameData memory game = mainContract.get_game(gameId);
-        assert(game.state == GameState.CANCELLED);
+        assert(game.status == GameStatus.CANCELLED);
 
         vm.stopBroadcast();
         console.log("SUCCESS Game Abortion test passed");
@@ -353,9 +353,9 @@ contract IntegrationScript is SetupScript {
                 uint8 state = uint8(uint256(entries[i].topics[2]));
 
                 if (eventGameId == gameId) {
-                    if (state == uint8(GameState.OPEN)) foundOpenEvent = true;
-                    if (state == uint8(GameState.ACTIVE)) foundActiveEvent = true;
-                    if (state == uint8(GameState.COMPLETED)) foundCompletedEvent = true;
+                    if (state == uint8(GameStatus.OPEN)) foundOpenEvent = true;
+                    if (state == uint8(GameStatus.ACTIVE)) foundActiveEvent = true;
+                    if (state == uint8(GameStatus.COMPLETED)) foundCompletedEvent = true;
                 }
             }
         }

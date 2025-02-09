@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
-import {OnkasOujiGame, GameData, GameState, Player, Speculation, RoundResult, IEntropy} from "../src/OnkasOujiGame.sol";
+import {OnkasOujiGame, GameData, GameStatus, Player, Speculation, RoundResult, IEntropy} from "../src/OnkasOujiGame.sol";
 import "../src/lib/models.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -198,7 +198,7 @@ contract GameTest is Test {
         assertEq(gameData.players[0].addr, player1);
         assertEq(gameData.players[1].addr, player2);
         assertEq(gameData.amount, 1 ether);
-        assertEq(uint8(gameData.state), uint8(GameState.OPEN));
+        assertEq(uint8(gameData.status), uint8(GameStatus.OPEN));
     }
 
     function test_AddSpeculation() public {
@@ -235,7 +235,7 @@ contract GameTest is Test {
         game.abort_game(gameId);
 
         GameData memory gameData = game.get_game(gameId);
-        assertEq(uint8(gameData.state), uint8(GameState.CANCELLED));
+        assertEq(uint8(gameData.status), uint8(GameStatus.CANCELLED));
 
         assertEq(token.balanceOf(player1), player1BalanceBefore + 1 ether);
         assertEq(token.balanceOf(player2), player2BalanceBefore + 1 ether);
@@ -293,10 +293,10 @@ contract GameTest is Test {
         GameData memory gameData = game.get_game(gameId);
 
         // Verify game state
-        assertEq(uint8(gameData.state), uint8(GameState.COMPLETED));
+        assertEq(uint8(gameData.status), uint8(GameStatus.COMPLETED));
 
         // Check winner payouts (exact amounts will depend on who won)
-        if (gameData.player1Wins > gameData.player2Wins) {
+        if (gameData.p1_wins > gameData.p2_wins) {
             assertEq(token.balanceOf(player1), player1BalanceBefore + 2 ether);
             assertEq(token.balanceOf(player2), player2BalanceBefore);
         } else {
@@ -342,7 +342,7 @@ contract GameTest is Test {
         GameData memory gameData = game.get_game(gameId);
 
         // Verify game completed
-        assertEq(uint8(gameData.state), uint8(GameState.COMPLETED));
+        assertEq(uint8(gameData.status), uint8(GameStatus.COMPLETED));
 
         // Get final balances
         uint256 player1FinalBalance = token.balanceOf(player1);
@@ -350,7 +350,7 @@ contract GameTest is Test {
         uint256 speculatorFinalBalance = token.balanceOf(speculator);
 
         // Check winner and payouts
-        if (gameData.player1Wins > gameData.player2Wins) {
+        if (gameData.p1_wins > gameData.p2_wins) {
             // Player 1 won
             assertEq(player1FinalBalance, player1InitialBalance + 1 ether); // Gets original stake + winnings
             assertEq(player2FinalBalance, player2InitialBalance - 1 ether); // Lost stake
@@ -393,7 +393,7 @@ contract GameTest is Test {
             game._entropyCallback(i + 1, address(entropy), bytes32(uint256(1234 + i)));
 
             GameData memory gameData = game.get_game(gameId);
-            assertEq(uint8(gameData.state), uint8(GameState.COMPLETED));
+            assertEq(uint8(gameData.status), uint8(GameStatus.COMPLETED));
         }
     }
 }

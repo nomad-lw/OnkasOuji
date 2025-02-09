@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.26;
 
-enum GameState {
+enum GameStatus {
     OPEN,
     ACTIVE,
+    UNSETTLED,
     COMPLETED,
     CANCELLED
 }
@@ -15,7 +16,7 @@ struct Player {
 
 struct Speculation {
     address speculator;
-    uint8 prediction; // 0 for first player, 1 for second player
+    bool prediction; // 0 p1, 1 p2
     uint256 amount; // Bet amount
 }
 
@@ -23,10 +24,10 @@ struct GameData {
     Player[2] players;
     Speculation[] speculations;
     uint256 amount;
-    GameState state;
+    GameStatus status;
     RoundResult[] rounds;
-    uint8 player1Wins;
-    uint8 player2Wins;
+    uint8 p1_wins;
+    uint8 p2_wins;
     uint256 totalbet;
 }
 
@@ -36,7 +37,13 @@ struct RoundResult {
     bool player1Won;
 }
 
-enum TEST_GAMETYPES {
+struct OnkaStats {
+    uint256 plays;
+    uint256 wins;
+    uint256 losses;
+}
+
+enum TestGameTypes {
     STANDARD,
     NO_SPECULATION,
     TWO_SPECULATIONS,

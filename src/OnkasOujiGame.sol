@@ -1,25 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.26;
 
+// Core imports
 import {OwnableRoles} from "solady/auth/OwnableRoles.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+// Interface imports
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {GameData, GameState, Player, Speculation, RoundResult} from "./lib/models.sol";
-import {IEntropy} from "node_modules/@pythnetwork/entropy-sdk-solidity/IEntropy.sol";
-import {IEntropyConsumer} from "node_modules/@pythnetwork/entropy-sdk-solidity/IEntropyConsumer.sol";
-import {ERC2771Forwarder} from "@openzeppelin/contracts/metatx/ERC2771Forwarder.sol";
-import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import {FixedPointMathLib as FPML} from "solady/utils/FixedPointMathLib.sol";
 
-contract OnkasOujiGame is OwnableRoles, ERC2771Forwarder, IEntropyConsumer {
-    // Storage
-    uint256 private _current_game_id;
-    mapping(uint256 => GameData) private _games;
-    uint256 private _revenue_bps = 200; // 2%
-    mapping(uint64 => uint256) private _entropy_cb_idx_to_game_id;
-    bool private _revshare_enabled = true;
-    address marketing_wallet;
+// Library imports
+import {FixedPointMathLib as FPML} from "solady/utils/FixedPointMathLib.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+
+// Local imports
+import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from "./lib/models.sol";
+
+contract OnkasOujiGame is ReentrancyGuard, OwnableRoles {
+    using EnumerableSet for EnumerableSet.UintSet;
 
     // Constants
     uint256 public constant BATTLE_ROUNDS = 5;
@@ -33,41 +31,78 @@ contract OnkasOujiGame is OwnableRoles, ERC2771Forwarder, IEntropyConsumer {
     // Interfaces
     IERC20 public immutable TOKEN_CONTRACT;
     IERC721 public immutable NFT_CONTRACT;
-    address public immutable PROVIDER;
-    IEntropy public immutable ENTROPY;
 
-    // Errors
-    error InactiveGame();
-    error InvalidGameID();
-    error InvalidAmount();
-    error InvalidProvider();
-    error InvalidPrediction();
-    error RegistrationFailed(string reason);
-    error InvalidNFTOwnership(address player, uint256 nft_id);
-    error InsufficientEntropyFee(uint256 fee, uint256 required);
-    error InsufficientBalance(uint256 balance, uint256 required, address addr);
+    // Storage
+    uint256 private _current_game_id;
+    mapping(uint256 => GameData) private _games;
+    EnumerableSet.UintSet private _active_game_ids;
+    mapping(uint256 => OnkaStats) private _onka_stats; // nft_id => stats
+
+    uint256 private _revenue_bps = 200; // 2%
+    bool private _revshare_enabled = true;
+    address marketing_wallet;
 
     // Events
     event GameCreated(uint256 indexed game_id, Player[2] players, uint256 amount);
     event GameStarted(uint256 indexed game_id, uint64 sequence_number);
-    event GameCompleted(uint256 indexed game_id, uint8 winner, RoundResult[BATTLE_ROUNDS] rounds);
+    event GameExecuted(uint256 indexed game_id);
+    event GameCompleted(uint256 indexed game_id, bool indexed winner, RoundResult[BATTLE_ROUNDS] rounds);
     event GameAborted(uint256 indexed game_id);
-    event CallbackOnInactiveGame(uint256 indexed game_id, GameState state);
-    event BetPlaced(uint256 indexed game_id, address indexed addr, uint8 prediction, uint256 amount);
+    event BetPlaced(uint256 indexed game_id, address indexed addr, bool indexed prediction, uint256 amount);
+    event CallbackOnInactiveGame(uint256 indexed game_id, GameStatus indexed status);
     event UserRegistered(bytes32 indexed secret, address indexed addr);
-    event TokenNotSupported(address token, string reason);
+    event TokenNotSupported(address indexed token, string reason);
 
-    constructor(address _nft_contract, address _token_contract, address _entropy, address _provider, address _marketing_wallet)
-        ERC2771Forwarder("OnkasOujiGame")
-    {
+    // Errors
+    error InvalidGame();
+    error InvalidGameID();
+    error InvalidAmount();
+    error InvalidProvider();
+    error InvalidPrediction();
+    error InvalidNFTOwnership(address player, uint256 nft_id);
+    error InvalidGameState(uint256 game_id, GameStatus current, GameStatus required);
+    error InsufficientEntropyFee(uint256 fee_supplied, uint256 required);
+    error InsufficientBalance(uint256 balance, uint256 required, address addr);
+    error RegistrationFailed(string reason);
+
+    constructor(address _nft_contract, address _token_contract, address _entropy, address _provider, address _marketing_wallet) {
         _initializeOwner(msg.sender);
         _grantRoles(msg.sender, ROLE_OPERATOR);
         NFT_CONTRACT = IERC721(_nft_contract);
         TOKEN_CONTRACT = IERC20(_token_contract);
-        ENTROPY = IEntropy(_entropy);
-        PROVIDER = _provider;
         marketing_wallet = _marketing_wallet;
     }
+
+    function get_current_game_id() external view returns (uint256) {
+        return _current_game_id;
+    }
+
+    function get_active_game_ids() external view returns (uint256[] memory) {
+        return _active_game_ids.values();
+    }
+
+    function get_game(uint256 game_id) external view returns (GameData memory) {
+        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
+        return _games[game_id];
+    }
+
+    function get_speculations(uint256 game_id) external view returns (Speculation[] memory) {
+        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
+        GameData storage game = _games[game_id];
+
+        Speculation[] memory speculations = new Speculation[](game.speculations.length);
+        for (uint256 i = 0; i < game.speculations.length; i++) {
+            speculations[i] = Speculation(game.speculations[i].speculator, game.speculations[i].prediction, game.speculations[i].amount);
+        }
+
+        return speculations;
+    }
+
+    function get_onka_stats(uint256 nft_id) external view returns (OnkaStats memory) {
+        return _onka_stats[nft_id];
+    }
+
+
 
     function register(bytes32 secret) external {
         if (TOKEN_CONTRACT.allowance(msg.sender, address(this)) < MAX_ALLOWANCE) revert RegistrationFailed("Insufficient allowance");
@@ -75,44 +110,38 @@ contract OnkasOujiGame is OwnableRoles, ERC2771Forwarder, IEntropyConsumer {
     }
 
     function new_game(Player[2] memory players, uint256 amount) external payable onlyRolesOrOwner(ROLE_OPERATOR) returns (uint256 game_id) {
-        // Validate
-        for (uint32 i; i < 2; i++) {
-            if (NFT_CONTRACT.ownerOf(players[i].nft_id) != players[i].addr) {
-                revert InvalidNFTOwnership(players[i].addr, players[i].nft_id);
-            }
-            TOKEN_CONTRACT.transferFrom(players[i].addr, address(this), amount);
-        }
+        // validate
+        _validate_player(players[0]);
+        _validate_player(players[1]);
+        TOKEN_CONTRACT.transferFrom(players[0].addr, address(this), amount);
+        TOKEN_CONTRACT.transferFrom(players[1].addr, address(this), amount);
 
-        // Increment game ID
+        // new game
         _current_game_id++;
         game_id = _current_game_id;
-
-        // Create new game
-        GameData storage game = _games[game_id];
-
-        // Set game data
-        game.players[0] = Player(players[0].addr, players[0].nft_id);
-        game.players[1] = Player(players[1].addr, players[1].nft_id);
-        game.amount = amount;
-        game.state = GameState.OPEN;
+        _games[game_id] = GameData({
+            players: [Player(players[0].addr, players[0].nft_id), Player(players[1].addr, players[1].nft_id)],
+            amount: amount,
+            status: GameStatus.OPEN,
+            speculations: new Speculation[](0),
+            totalbet: 0
+        });
+        _active_game_ids.add(game_id);
 
         emit GameCreated(game_id, players, amount);
     }
 
-    function place_bet(uint256 game_id, address speculator, uint8 prediction, uint256 amount) external onlyRolesOrOwner(ROLE_OPERATOR) {
-        // Validate game ID
-        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
-        GameData storage game = _games[game_id];
-        if (game.state != GameState.OPEN) revert InactiveGame();
+    function place_bet(uint256 game_id, address speculator, bool prediction, uint256 amount) external onlyRolesOrOwner(ROLE_OPERATOR) {
+        // validate
+        GameData storage game = _get_validated_game(game_id, GameStatus.OPEN);
 
-        // Validate prediction (must be 0 or 1), amount > 0
-        if (prediction > 1) revert InvalidPrediction();
+        // if (prediction > 1) revert InvalidPrediction();
         if (amount == 0) revert InvalidAmount();
 
-        // Transfer tokens from speculator to contract
+        // transfer
         TOKEN_CONTRACT.transferFrom(speculator, address(this), amount);
 
-        // Add speculation to game
+        // save state
         game.speculations.push(Speculation({speculator: speculator, prediction: prediction, amount: amount}));
         game.totalbet += amount;
 
@@ -120,68 +149,58 @@ contract OnkasOujiGame is OwnableRoles, ERC2771Forwarder, IEntropyConsumer {
     }
 
     function start_game(uint256 game_id) external payable onlyRolesOrOwner(ROLE_OPERATOR) {
-        // Validate
-        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
-        GameData storage game = _games[game_id];
-        if (game.state != GameState.OPEN) revert InactiveGame();
+        // validate
+        GameData storage game = _get_validated_game(game_id, GameStatus.OPEN);
 
-        // Get the required fee
-        uint128 requestFee = ENTROPY.getFee(PROVIDER);
-        if (msg.value < requestFee) revert InsufficientEntropyFee(msg.value, requestFee); // tODO: maybe also check existing balance
+        // request entropy
+        uint128 request_fee = ENTROPY.getFee(PROVIDER);
+        if (msg.value < request_fee) {
+            revert InsufficientEntropyFee(msg.value, request_fee);
+        }
+        bytes32 user_random_number = keccak256(abi.encodePacked(game_id, game.players[0].addr, game.players[1].addr, block.timestamp));
+        uint64 sequence_number = ENTROPY.requestWithCallback{value: request_fee}(PROVIDER, user_random_number);
 
-        // Generate user random number (using game details as entropy)
-        bytes32 userRandomNumber = keccak256(abi.encodePacked(game_id, game.players[0].addr, game.players[1].addr, block.timestamp));
+        // save state
+        game.status = GameStatus.ACTIVE;
+        _entropy_cb_idx_to_game_id[sequence_number] = game_id;
 
-        // Request random number from Entropy
-        game.state = GameState.ACTIVE;
-        uint64 sequenceNumber = ENTROPY.requestWithCallback{value: requestFee}(PROVIDER, userRandomNumber);
-
-        // Store game ID for the callback
-        _entropy_cb_idx_to_game_id[sequenceNumber] = game_id;
-
-        emit GameStarted(game_id, sequenceNumber);
+        emit GameStarted(game_id, sequence_number);
     }
 
-    // Implement required interface method
-    function getEntropy() internal view override returns (address) {
-        return address(ENTROPY);
-    }
-
-    // Callback implementation
+    // Entropy Callback
     function entropyCallback(uint64 sequence_number, address _provider, bytes32 random_number) internal override {
-        // if (_providerAddress != PROVIDER) revert InvalidProvider();
+        // if (_provider != PROVIDER) revert InvalidProvider();
         uint256 game_id = _entropy_cb_idx_to_game_id[sequence_number];
         GameData storage game = _games[game_id];
-        if (game.state != GameState.ACTIVE) {
-            emit CallbackOnInactiveGame( game_id,game.state);
+        if (game.status != GameStatus.ACTIVE) {
+            emit CallbackOnInactiveGame(game_id, game.status);
             return;
         }
+        game.status = GameStatus.UNSETTLED;
 
-        // Ensure game exists and is still open
-        // require(game.state == GameState.OPEN, "Game: Invalid game state");
-
-        uint8 player1Wins = 0;
-        uint8 player2Wins = 0;
-        uint256 player1Health = INITIAL_HEALTH;
-        uint256 player2Health = INITIAL_HEALTH;
+        uint8 p1_wins = 0;
+        uint8 p2_wins = 0;
+        uint256 p1_health = INITIAL_HEALTH;
+        uint256 p2_health = INITIAL_HEALTH;
 
         // Use the random number to generate multiple dice rolls
-        bytes32 currentRandom = random_number;
+        bytes32 r = random_number;
 
         // Simulate rounds until one player wins 3 times
-        for (uint256 round = 0; round < BATTLE_ROUNDS && player1Wins < WINS_REQUIRED && player2Wins < WINS_REQUIRED; round++) {
+        for (uint256 round = 0; round < BATTLE_ROUNDS && p1_wins < WINS_REQUIRED && p2_wins < WINS_REQUIRED; round++) {
             // Generate two dice rolls (1-6) from the current random number
-            currentRandom = keccak256(abi.encodePacked(currentRandom, round));
-            uint8 diceRoll1 = uint8(uint256(currentRandom) % 6) + 1;
-            currentRandom = keccak256(abi.encodePacked(currentRandom, round + 1));
-            uint8 diceRoll2 = uint8(uint256(currentRandom) % 6) + 1;
+            // TODO: optimize
+            r = keccak256(abi.encodePacked(r, round));
+            uint8 diceRoll1 = uint8(uint256(r) % 6) + 1;
+            r = keccak256(abi.encodePacked(r, round + 1));
+            uint8 diceRoll2 = uint8(uint256(r) % 6) + 1;
 
-            // Reroll if it's a tie (similar to MVP logic)
+            // reroll if tie
             while (diceRoll1 == diceRoll2) {
-                currentRandom = keccak256(abi.encodePacked(currentRandom, "reroll"));
-                diceRoll1 = uint8(uint256(currentRandom) % 6) + 1;
-                currentRandom = keccak256(abi.encodePacked(currentRandom, "reroll2"));
-                diceRoll2 = uint8(uint256(currentRandom) % 6) + 1;
+                r = keccak256(abi.encodePacked(r, "reroll"));
+                diceRoll1 = uint8(uint256(r) % 6) + 1;
+                r = keccak256(abi.encodePacked(r, "reroll2"));
+                diceRoll2 = uint8(uint256(r) % 6) + 1;
             }
 
             bool player1WonRound = diceRoll1 > diceRoll2;
@@ -191,22 +210,31 @@ contract OnkasOujiGame is OwnableRoles, ERC2771Forwarder, IEntropyConsumer {
 
             // Update wins and health
             if (player1WonRound) {
-                player1Wins++;
-                player2Health = (WINS_REQUIRED - player1Wins) * HEALTH_PER_LIFE;
+                p1_wins++;
+                p2_health = (WINS_REQUIRED - p1_wins) * HEALTH_PER_LIFE;
             } else {
-                player2Wins++;
-                player1Health = (WINS_REQUIRED - player2Wins) * HEALTH_PER_LIFE;
+                p2_wins++;
+                p1_health = (WINS_REQUIRED - p2_wins) * HEALTH_PER_LIFE;
             }
         }
 
-        game.player1Wins = player1Wins;
-        game.player2Wins = player2Wins;
+        game.p1_wins = p1_wins;
+        game.p2_wins = p2_wins;
+
+        // clean up
+        delete _entropy_cb_idx_to_game_id[sequence_number];
+        emit GameExecuted(game_id);
+    }
+
+    function end_game(uint256 game_id) external onlyRolesOrOwner(ROLE_OPERATOR) {
+        // validate
+        GameData storage game = _get_validated_game(game_id, GameStatus.UNSETTLED);
 
         // Determine winner (0 for player1, 1 for player2)
-        uint8 winner = player1Wins > player2Wins ? 0 : 1;
+        uint8 winner = game.p1_wins > game.p2_wins ? 0 : 1;
         {
             // Update game state
-            game.state = GameState.COMPLETED;
+            game.status = GameStatus.COMPLETED;
 
             // Handle payouts
             uint256 winnings = game.amount * 2;
@@ -231,7 +259,7 @@ contract OnkasOujiGame is OwnableRoles, ERC2771Forwarder, IEntropyConsumer {
             }
 
             // Transfer rewards proportionally
-            if (winning_pool == game.totalbet) {
+            if (winning_pool == 0 || winning_pool == game.totalbet) {
                 _refund_speculations(game);
             } else {
                 for (uint256 i = 0; i < game.speculations.length; i++) {
@@ -242,61 +270,52 @@ contract OnkasOujiGame is OwnableRoles, ERC2771Forwarder, IEntropyConsumer {
                     }
                 }
             }
-            if (_revshare_enabled) TOKEN_CONTRACT.transfer(marketing_wallet, bet_revenue + revenue);
+            if (_revshare_enabled) {
+                TOKEN_CONTRACT.transfer(marketing_wallet, bet_revenue + revenue);
+            }
         }
-
-        // Clean up
-        delete _entropy_cb_idx_to_game_id[sequence_number];
-
-        RoundResult[BATTLE_ROUNDS] memory roundsArray;
+        RoundResult[BATTLE_ROUNDS] memory rounds;
         for (uint256 i = 0; i < game.rounds.length; i++) {
-            roundsArray[i] = game.rounds[i];
+            rounds[i] = game.rounds[i];
         }
-        emit GameCompleted(game_id, winner, roundsArray);
+        _active_game_ids.remove(game_id);
+        emit GameCompleted(game_id, winner, rounds);
     }
 
-    function abort_game(uint256 game_id) external onlyRolesOrOwner(ROLE_OPERATOR) {
-        // Validate game ID
+    function abort_game(uint256 game_id) external nonReentrant onlyRolesOrOwner(ROLE_OPERATOR) {
+        // validate
         if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
         GameData storage game = _games[game_id];
-        if (game.state == GameState.COMPLETED || game.state == GameState.CANCELLED) return; // No-op if game is already completed or cancelled
+        if (game.status == GameStatus.COMPLETED || game.status == GameStatus.CANCELLED) return; // No-op if game is already completed or cancelled
 
-        // Set game state to CANCELLED
-        game.state = GameState.CANCELLED;
-
-        // Refund players
+        // process refunds
         for (uint32 i; i < 2; i++) {
             TOKEN_CONTRACT.transfer(game.players[i].addr, game.amount);
         }
-
         _refund_speculations(game);
+
+        // save state
+        game.status = GameStatus.CANCELLED;
+        _active_game_ids.remove(game_id);
 
         emit GameAborted(game_id);
     }
 
-    function get_current_game_id() external view returns (uint256) {
-        return _current_game_id;
-    }
-
-    function get_game(uint256 game_id) external view returns (GameData memory) {
-        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
-        return _games[game_id];
-    }
-
-    function get_speculations(uint256 game_id) external view returns (Speculation[] memory) {
-        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
-        GameData storage game = _games[game_id];
-
-        Speculation[] memory speculations = new Speculation[](game.speculations.length);
-        for (uint256 i = 0; i < game.speculations.length; i++) {
-            speculations[i] = Speculation(game.speculations[i].speculator, game.speculations[i].prediction, game.speculations[i].amount);
-        }
-
-        return speculations;
-    }
-
     function setRevenueBPS(uint256 bps) external onlyOwner {
         _revenue_bps = bps;
+    }
+
+    function _validate_player(Player memory player) internal view {
+        if (NFT_CONTRACT.ownerOf(player.nft_id) != player.addr) {
+            revert InvalidNFTOwnership(player.addr, player.nft_id);
+        }
+    }
+
+    function _get_validated_game(uint256 game_id, GameStatus expected) internal view returns (GameData storage) {
+        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
+        GameData storage game = _games[game_id];
+        if (game.status != expected) revert InvalidGameState(game_id, game.status, expected);
+        return game;
     }
 
     function _refund_speculations(GameData storage game) internal {

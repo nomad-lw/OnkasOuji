@@ -5,6 +5,7 @@ libs = ["lib"]
 
 solc = "0.8.28"
 evm_version = "paris"
+via_ir = true
 
 remappings = [
 "@pythnetwork/entropy-sdk-solidity/=node_modules/@pythnetwork/entropy-sdk-solidity",
