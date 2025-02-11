@@ -9,4 +9,4 @@
 	url = https://github.com/vectorized/solady
 [submodule "lib/vrf-solidity"]
 	path = lib/vrf-solidity
-	url = https://github.com/witnet/vrf-solidity
+	url = https://github.com/nomad-lw/vrf-solidity

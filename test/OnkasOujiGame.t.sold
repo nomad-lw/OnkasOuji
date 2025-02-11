@@ -105,10 +105,10 @@ contract OnkasOujiGameTest is Test {
         // Place bet
         uint256 bet_amount = 0.5 ether;
         vm.prank(OPERATOR);
-        game.place_bet(game_id, SPECULATOR_ONE, 0, bet_amount);
+        game.place_bet(game_id, SPECULATOR_ONE, true, bet_amount);
 
         GameData memory game_data = game.get_game(game_id);
-        assertEq(game_data.totalbet, bet_amount);
+        assertEq(game_data.handle, bet_amount);
         assertEq(game_data.speculations.length, 1);
         assertEq(game_data.speculations[0].speculator, SPECULATOR_ONE);
         assertEq(game_data.speculations[0].amount, bet_amount);
@@ -213,6 +213,6 @@ contract OnkasOujiGameTest is Test {
         game.place_bet(game_id, SPECULATOR_ONE, 0, amount);
 
         GameData memory game_data = game.get_game(game_id);
-        assertEq(game_data.totalbet, amount);
+        assertEq(game_data.handle, amount);
     }
 }

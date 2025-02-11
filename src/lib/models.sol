@@ -28,13 +28,14 @@ struct GameData {
     RoundResult[] rounds;
     uint8 p1_wins;
     uint8 p2_wins;
-    uint256 totalbet;
+    uint256 handle;
+    bytes32 alpha_prefix;
 }
 
 struct RoundResult {
-    uint8 player1Roll;
-    uint8 player2Roll;
-    bool player1Won;
+    uint8 roll_p1;
+    uint8 roll_p2;
+    bool p1_won;
 }
 
 struct OnkaStats {
