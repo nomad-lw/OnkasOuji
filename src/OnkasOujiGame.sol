@@ -2,9 +2,10 @@
 pragma solidity ^0.8.26;
 
 // Core imports
-import {RandomSourcer} from "./RandomSourcer.sol";
+import {Wyrd} from "./Wyrd.sol";
 
 // Interface imports
+import {IOnkasOujiGame} from "./interfaces/IOnkasOujiGame.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -15,7 +16,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 // Local imports
 import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from "./lib/models.sol";
 
-contract OnkasOujiGame is RandomSourcer {
+contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
     using EnumerableSet for EnumerableSet.UintSet;
 
     // Constants
@@ -23,9 +24,9 @@ contract OnkasOujiGame is RandomSourcer {
     uint256 public constant WINS_REQUIRED = 3;
     uint256 public constant INITIAL_HEALTH = 9;
     uint256 public constant HEALTH_PER_LIFE = 3;
-    uint256 public constant BPS_DENOMINATOR = 10_000; // 100%
-    uint256 public constant MAX_ALLOWANCE = type(uint256).max;
-    uint256 public constant ROLE_OPERATOR = _ROLE_0;
+    uint256 internal constant BPS_DENOMINATOR = 10_000; // 100%
+    uint256 internal constant MAX_ALLOWANCE = type(uint256).max;
+    // uint256 internal constant ROLE_OPERATOR = _ROLE_0;
 
     // Interfaces
     IERC20 public immutable TOKEN_CONTRACT;
@@ -64,9 +65,14 @@ contract OnkasOujiGame is RandomSourcer {
     error InsufficientBalance(uint256 balance, uint256 required, address addr);
     error RegistrationFailed(string reason);
 
-    constructor(address _nft_contract, address _token_contract, address _entropy, address _provider, address _marketing_wallet)
-        RandomSourcer(7, _provider, _entropy, _provider)
-    {
+    constructor(
+        address _nft_contract,
+        address _token_contract,
+        address _entropy,
+        address _provider,
+        address _marketing_wallet,
+        uint256[2] memory _sav_pk
+    ) Wyrd(7, _provider, _entropy, _provider, _sav_pk) {
         _initializeOwner(msg.sender);
         _grantRoles(msg.sender, ROLE_OPERATOR);
         NFT_CONTRACT = IERC721(_nft_contract);
@@ -101,6 +107,15 @@ contract OnkasOujiGame is RandomSourcer {
 
     function get_onka_stats(uint256 nft_id) external view returns (OnkaStats memory) {
         return _onka_stats[nft_id];
+    }
+
+    function compute_alpha(uint256 game_id) public view returns (bytes32) {
+        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
+        return compute_alpha(game_id, _games[game_id]);
+    }
+
+    function compute_alpha(uint256 game_id, GameData storage game) internal view returns (bytes32) {
+        return game.alpha_prefix ^ bytes32(uint256(uint160(game.players[0].addr) ^ uint160(game.players[1].addr)) ^ game_id);
     }
 
     function calc_book(uint256 game_id) public view returns (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) {
@@ -140,7 +155,12 @@ contract OnkasOujiGame is RandomSourcer {
         emit UserRegistered(secret, msg.sender);
     }
 
-    function new_game(Player[2] memory players, uint256 amount, bytes32 alpha_prefix) external payable onlyRolesOrOwner(ROLE_OPERATOR) returns (uint256 game_id) {
+    function new_game(Player[2] memory players, uint256 amount, bytes32 alpha_prefix)
+        external
+        payable
+        onlyRolesOrOwner(ROLE_OPERATOR)
+        returns (uint256 game_id)
+    {
         // validate
         _validate_player(players[0]);
         _validate_player(players[1]);
@@ -185,78 +205,16 @@ contract OnkasOujiGame is RandomSourcer {
         // validate
         GameData storage game = _get_validated_game(game_id, GameStatus.OPEN);
 
-        // request random number
-        uint request_fee = calc_fee();
+        // save state & request random numbr
+        (uint256 request_fee,,) = calc_fee();
         if (msg.value < request_fee) {
             revert InsufficientFee(msg.value, request_fee);
         }
-        _request_random(game_id, alpha);
-
-        // save state
         game.status = GameStatus.ACTIVE;
-        // _entropy_cb_idx_to_game_id[sequence_number] = game_id;
+        _request_random(game_id, compute_alpha(game_id, game));
 
         emit GameStarted(game_id);
     }
-
-    // // Entropy Callback
-    // function entropyCallback(uint64 sequence_number, address _provider, bytes32 random_number) internal override {
-    //     // if (_provider != PROVIDER) revert InvalidProvider();
-    //     uint256 game_id = _entropy_cb_idx_to_game_id[sequence_number];
-    //     GameData storage game = _games[game_id];
-    //     if (game.status != GameStatus.ACTIVE) {
-    //         emit CallbackOnInactiveGame(game_id, game.status);
-    //         return;
-    //     }
-    //     game.status = GameStatus.UNSETTLED;
-
-    //     uint8 p1_wins = 0;
-    //     uint8 p2_wins = 0;
-    //     uint256 p1_health = INITIAL_HEALTH;
-    //     uint256 p2_health = INITIAL_HEALTH;
-
-    //     // Use the random number to generate multiple dice rolls
-    //     bytes32 r = random_number;
-
-    //     // Simulate rounds until one player wins 3 times
-    //     for (uint256 round = 0; round < BATTLE_ROUNDS && p1_wins < WINS_REQUIRED && p2_wins < WINS_REQUIRED; round++) {
-    //         // Generate two dice rolls (1-6) from the current random number
-    //         // TODO: optimize
-    //         r = keccak256(abi.encodePacked(r, round));
-    //         uint8 diceRoll1 = uint8(uint256(r) % 6) + 1;
-    //         r = keccak256(abi.encodePacked(r, round + 1));
-    //         uint8 diceRoll2 = uint8(uint256(r) % 6) + 1;
-
-    //         // reroll if tie
-    //         while (diceRoll1 == diceRoll2) {
-    //             r = keccak256(abi.encodePacked(r, "reroll"));
-    //             diceRoll1 = uint8(uint256(r) % 6) + 1;
-    //             r = keccak256(abi.encodePacked(r, "reroll2"));
-    //             diceRoll2 = uint8(uint256(r) % 6) + 1;
-    //         }
-
-    //         bool player1WonRound = diceRoll1 > diceRoll2;
-
-    //         // Record round result
-    //         game.rounds.push(RoundResult({player1Roll: diceRoll1, player2Roll: diceRoll2, player1Won: player1WonRound}));
-
-    //         // Update wins and health
-    //         if (player1WonRound) {
-    //             p1_wins++;
-    //             p2_health = (WINS_REQUIRED - p1_wins) * HEALTH_PER_LIFE;
-    //         } else {
-    //             p2_wins++;
-    //             p1_health = (WINS_REQUIRED - p2_wins) * HEALTH_PER_LIFE;
-    //         }
-    //     }
-
-    //     game.p1_wins = p1_wins;
-    //     game.p2_wins = p2_wins;
-
-    //     // clean up
-    //     // delete _entropy_cb_idx_to_game_id[sequence_number];
-    //     emit GameExecuted(game_id);
-    // }
 
     function exec_game(uint256 game_id, bytes32 random_number) public {
         GameData storage game = _get_validated_game(game_id, GameStatus.ACTIVE);
@@ -284,13 +242,13 @@ contract OnkasOujiGame is RandomSourcer {
                 roll_p2 = uint8(uint256(r) % 6) + 1;
             }
 
-            bool w0 = roll_p1 > roll_p2;
+            bool roll_w0 = roll_p1 > roll_p2;
 
             // Record round result
-            rounds[round] = RoundResult({roll_p1: roll_p1, roll_p2: roll_p2, p1_won: w0});
+            rounds[round] = RoundResult({roll_p1: roll_p1, roll_p2: roll_p2, p1_won: roll_w0});
 
             // Update wins and health
-            if (w0) {
+            if (roll_w0) {
                 p1_wins++;
                 p2_health = (WINS_REQUIRED - p1_wins) * HEALTH_PER_LIFE;
             } else {
@@ -311,7 +269,6 @@ contract OnkasOujiGame is RandomSourcer {
         _onka_stats[game.players[w0 ? 1 : 0].nft_id].losses += 1;
 
         // clean up
-        // delete _entropy_cb_idx_to_game_id[sequence_number];
         emit GameExecuted(game_id);
     }
 
@@ -369,7 +326,7 @@ contract OnkasOujiGame is RandomSourcer {
             }
         }
         RoundResult[BATTLE_ROUNDS] memory rounds;
-        uint r_len = game.rounds.length;
+        uint256 r_len = game.rounds.length;
         for (uint8 i; i < r_len; ++i) {
             rounds[i] = game.rounds[i];
         }
