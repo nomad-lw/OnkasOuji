@@ -118,6 +118,18 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         return game.alpha_prefix ^ bytes32(uint256(uint160(game.players[0].addr) ^ uint160(game.players[1].addr)) ^ game_id);
     }
 
+    /**
+     * @notice Calculates the betting book for a particular game
+     * @dev In sports betting and gambling terminology, a "book" refers to the collection
+     * of all bets (speculations) placed on an event, along with the odds and liquidity
+     * for each side. This function calculates the current state of the betting book,
+     * including odds and market depth (liquidity) for each player.
+     * @param game_id The ID of the game to calculate the book for
+     * @return p1_odds The odds for player 1 (ratio of p1_depth to p2_depth)
+     * @return p2_odds The odds for player 2 (ratio of p2_depth to p1_depth)
+     * @return p1_depth The total amount bet on player 1's victory
+     * @return p2_depth The total amount bet on player 2's victory
+     */
     function calc_book(uint256 game_id) public view returns (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) {
         if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
         Speculation[] memory specs = _games[game_id].speculations;
@@ -151,7 +163,9 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
     }
 
     function register(bytes32 secret) external {
-        if (TOKEN_CONTRACT.allowance(msg.sender, address(this)) < MAX_ALLOWANCE) revert RegistrationFailed("Insufficient allowance");
+        if (TOKEN_CONTRACT.allowance(msg.sender, address(this)) < MAX_ALLOWANCE) {
+            revert RegistrationFailed("Insufficient allowance");
+        }
         emit UserRegistered(secret, msg.sender);
     }
 

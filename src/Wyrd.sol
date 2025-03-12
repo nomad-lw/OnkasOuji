@@ -6,6 +6,15 @@ pragma solidity ^0.8.26;
  * @notice Configurable randomness sourcing from external providers (Pyth Entropy, RandomizerAI) or ECVRF-based self attested VRFs
  * @author Sambot (https://github.com/nomad-lw/OnkasOuji/blob/main/src/RandomSourcer.sol)
  * @dev This contract is designed to be inherited by other contracts that need random numbers.
+ *      It supports three randomness sources:
+ *      1. Pyth Entropy - External oracle-based randomness
+ *      2. RandomizerAI - Externally provided random values
+ *      3. Self Attested VRF - Elliptic curve VRF with on-chain verification
+ *
+ *      Security considerations:
+ *      - Using multiple sources increases fault tolerance and manipulation resistance
+ *      - Inheriting contracts should verify randomness was properly fulfilled
+ *      - SAV (Self Attested VRF) depends on proper key management by the ROLE_SAV_PROVER
  *
  *
  *  .                                                                   .,
@@ -65,6 +74,10 @@ import {IEntropyConsumer} from "node_modules/@pythnetwork/entropy-sdk-solidity/I
 import {VRF} from "vrf-solidity/contracts/VRF.sol";
 import {EntropyStructs} from "node_modules/@pythnetwork/entropy-sdk-solidity/EntropyStructs.sol";
 
+/**
+ * @title Wyrd
+ * @notice Abstract contract for handling randomness from multiple sources
+ */
 abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer {
     // constants
     uint8 internal constant FLAG_PYTH = 1 << 0;
@@ -73,6 +86,9 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     uint256 internal constant ROLE_OPERATOR = _ROLE_0;
     uint256 internal constant ROLE_SAV_PROVER = _ROLE_1;
     uint256 internal constant CALLBACK_GAS_LIMIT = 100_000;
+    bool internal constant SAV_REQ_LAST = true; // mitigate beta callback reordering by forcing self-attested VRF to be last
+    bool internal immutable STORE_ALPHA_INPUTS; // configurable flag to save alpha input values
+
 
     // interfaces
     address public immutable PYTH_PROVIDER;
@@ -83,11 +99,13 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     bool public pyth_enabled;
     bool public randomizer_enabled;
     bool public sav_enabled;
+    uint256[2] public SAV_PUB_KEY; // would like this to be a constant. Can't
+    uint256 public sav_last_key_update_timestamp;
     mapping(uint64 => uint256) internal pyth_cbidx_req;
     mapping(uint256 => uint256) internal randomizer_cbidx_req;
     mapping(uint256 => uint8) internal req_executions;
     mapping(uint256 => bytes32) internal req_rand;
-    uint256[2] public SAV_PUB_KEY;
+    mapping(uint256 => bytes32) internal req_alpha; // inheriting contract can override usefulness
 
     /* ▀▀▀ Events ▀▀▀ */
     event RandomnessRequested(uint256 indexed req_id, uint8 indexed flag);
@@ -96,6 +114,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     event RequestAborted(uint256 indexed req_id);
     event CallbackOnInactiveRequest(uint256 indexed req_id, uint8 indexed flag, uint256 sequence_number);
     event RandomnessSourcesUpdated(uint8 old_sources, uint8 new_sources);
+    event SAVPublicKeyUpdated(uint256[2] newPublicKey);
 
     /* ▀▀▀ Errors ▀▀▀ */
     error InvalidVRFProof();
@@ -104,7 +123,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     error UnauthorizedCaller();
     error InsufficientFee(uint256 fee_supplied, uint256 required);
 
-    constructor(uint8 _flags, address _pyth_provider, address _pyth_entropy, address _randomizer, uint256[2] memory _sav_pk) {
+    constructor(uint8 _flags, address _pyth_provider, address _pyth_entropy, address _randomizer, uint256[2] memory _sav_pk, bool _store_alpha) {
         require(_pyth_provider != address(0), "Invalid Pyth provider");
         require(_pyth_entropy != address(0), "Invalid Pyth entropy");
         require(_randomizer != address(0), "Invalid randomizer");
@@ -122,6 +141,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
         RANDOMIZER = IRandomizer(_randomizer);
 
         SAV_PUB_KEY = _sav_pk;
+        STORE_ALPHA_INPUTS = _store_alpha;
     }
 
     /* ▀▀▀ View/Pure Functions ▀▀▀ */
@@ -144,6 +164,16 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     function get_random_value(uint256 req_id) external view returns (bytes32 rand, bool completed) {
         completed = req_executions[req_id] == 0;
         return (req_rand[req_id], completed);
+    }
+
+    function get_alpha(uint req_id) public virtual view returns (bytes32) {
+        require(STORE_ALPHA_INPUTS, "THIS FN SHOULD NEVER BE CALLED IF STORE_ALPHA_INPUTS is disabled");
+
+        bytes32 alpha = req_alpha[req_id]; // 0x0 if not stored
+        (bool is_active, ) = get_request_status(req_id);
+        if (!is_active && alpha == bytes32(0)) revert("Alpha value has been deleted");
+
+        return alpha;
     }
 
     function get_active_sources() public view returns (uint8) {
@@ -232,7 +262,11 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
 
     /// Self Attested VRF
 
-    function compute_fast_verify_params(uint256[4] memory _proof, bytes memory _alpha) public view returns (uint256[2] memory U, uint256[4] memory V) {
+    function compute_fast_verify_params(uint256[4] memory _proof, bytes memory _alpha)
+        public
+        view
+        returns (uint256[2] memory U, uint256[4] memory V)
+    {
         return VRF.computeFastVerifyParams(SAV_PUB_KEY, _proof, _alpha);
     }
 
@@ -246,26 +280,40 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
         return VRF.verify(SAV_PUB_KEY, _proof, abi.encodePacked(_beta));
     }
 
+
+
     /**
      * @dev Callback function for SAV (Self Attested VRF) requests
      * @param req_id The ID of the request, directly corresponds to the main randomness request id
      * @param beta The random value message being fed.
      */
-    function sav_callback(
-        uint256 req_id,
-        bytes memory _alpha,
-        bytes32 beta,
-        uint256[4] memory _proof,
-        uint256[2] memory _U,
-        uint256[4] memory _V
-    ) external onlyRolesOrOwner(ROLE_SAV_PROVER) {
+    function sav_callback(uint256 req_id, bytes memory _alpha, bytes32 beta, uint256[4] memory _proof, uint256[2] memory _U, uint256[4] memory _V)
+        external
+        onlyRolesOrOwner(ROLE_SAV_PROVER)
+    {
+        // Ensure SAV is the last callback if configured
+        if (SAV_REQ_LAST && (req_executions[req_id] != FLAG_SAV)) {
+            revert("SAV must be last callback: other providers have not completed");
+        }
+        bytes32 original_alpha = get_alpha(req_id);
+        if (keccak256(_alpha) != keccak256(abi.encodePacked(original_alpha))) revert InvalidVRFProof(); // verify alpha
+
         if (decoded_proof_to_hash(_proof) != beta) revert InvalidVRFProof();
-        if (!VRF.fastVerify(SAV_PUB_KEY, _proof, _alpha,_U,_V)) revert InvalidVRFProof();
+        if (!VRF.fastVerify(SAV_PUB_KEY, _proof, _alpha, _U, _V)) revert InvalidVRFProof();
         process_callback(req_id, req_id, FLAG_SAV, beta);
     }
 
+    /// @notice Updates the SAV public key with a 4-hour cooldown period
+    /// @dev Only callable by accounts with ROLE_SAV_PROVER role
+    /// @param _publicKey The new public key to set
     function set_sav_public_key(uint256[2] memory _publicKey) public onlyRolesOrOwner(ROLE_SAV_PROVER) {
+        // Ensure 4 hours (14400 seconds) have passed since the last update
+        require(block.timestamp >= sav_last_key_update_timestamp + 4 hours, "Key change cooldown: wait 4 hours");
+
         SAV_PUB_KEY = _publicKey;
+        sav_last_key_update_timestamp = block.timestamp;
+
+        emit SAVPublicKeyUpdated(_publicKey);
     }
 
     /* ▀▀▀ Core Functions ▀▀▀ */
@@ -281,11 +329,13 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     /// @notice Request random number with required fee paid in transaction
     /// @dev Fee handling is per-request basis, ensuring funds are available for each request
     /// @param req_id Unique identifier for the request
-    /// @param alpha Seed (plaintext, predictable) for the pseudo-random function
+    /// @param alpha Seed (plaintext, predictable, publicly sourced) for the pseudo-random function
     /// @custom:security Fee amount is validated against all enabled sources before processing
     function _request_random(uint256 req_id, bytes32 alpha) internal onlyRolesOrOwner(ROLE_OPERATOR) nonReentrant {
-        if (req_id == 0) revert InvalidRequest(); // unnecessary?
+        if (req_id == 0) revert InvalidRequest(); // unnecessary? retaining for verbosity through param vals
         if (req_executions[req_id] != 0) revert RequestCollision(req_id);
+
+        if (STORE_ALPHA_INPUTS) req_alpha[req_id] = alpha;
 
         uint256 available_fee = msg.value;
         (uint256 required_fee, uint128 pyth_fee, uint256 randomizer_fee) = calc_fee();
@@ -304,7 +354,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
 
         if (randomizer_enabled) {
             req_executions[req_id] |= FLAG_RANDOMIZER;
-            if (randomizer_fee > 0) randomizer_deposit(available_fee); // allow deposit buffer
+            if (randomizer_fee > 0) randomizer_deposit(available_fee); // allow deposit buffer through overallocation
             uint256 idx = RANDOMIZER.request(CALLBACK_GAS_LIMIT);
             randomizer_cbidx_req[idx] = req_id;
             emit RandomnessRequested(req_id, FLAG_RANDOMIZER);
@@ -329,10 +379,12 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
             return;
         }
         req_executions[req_id] ^= src_flag;
-        req_rand[req_id] ^= beta;
+        // req_rand[req_id] ^= beta;
+        req_rand[req_id] = keccak256(abi.encodePacked(req_rand[req_id], beta)); // preimage resistance
         emit RandomnessGenerated(req_id, src_flag);
         if (req_executions[req_id] == 0) {
             emit RequestCompleted(req_id);
+            if (STORE_ALPHA_INPUTS) delete req_alpha[req_id];
         }
     }
 

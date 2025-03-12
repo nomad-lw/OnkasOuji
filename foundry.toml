@@ -2,6 +2,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+fs_permissions = [{ access = "read-write", path = "./out"}]
 
 solc = "0.8.28"
 evm_version = "paris"
@@ -12,8 +13,10 @@ remappings = [
 # "@solady/=lib/solady/src",
 ]
 
-# [profile.ci]
-# fuzz = { runs = 10_000 }
+# testing
+verbosity = 3
+no-match-path = "test/*"
+skip=[".t.sol",'.sol']
 
 # [profile.default.optimizer_details]
 # yul = true
@@ -30,7 +33,11 @@ remappings = [
 
 # [profile.default.model_checker]
 # contracts = { check_storage = true, }
-fs_permissions = [{ access = "read-write", path = "./out"}]
+
+
+[profile.ci]
+verbosity = 4
+# fuzz = { runs = 10_000 }
 
 [fmt]
 line_length = 150
