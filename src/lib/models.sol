@@ -28,7 +28,7 @@ struct GameData {
     RoundResult[] rounds;
     uint8 p1_wins;
     uint8 p2_wins;
-    uint256 handle;
+    uint256 bet_pool; // bet pool sans player stakes
     bytes32 alpha_prefix;
 }
 

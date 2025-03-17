@@ -1,6 +1,55 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.26;
 
+/**
+ * @title OnkasOujiGame
+ * @notice The Onka Ouji Game
+ * @author Sambot (https://github.com/nomad-lw/OnkasOuji/blob/main/src/RandomSourcer.sol)
+ * @dev
+ *
+ *  .                                                                   .,
+ *                             ii                                     ;LL.
+ *                            ;LLi                                   :LfL;
+ *                            tLLf.                                 .fLfL:
+ *                           .fLfL;                                 1LfLf.
+ *                           ;LffLt                                ;LfLLf.
+ *                           tLfLfL,                              .fLffLf.
+ *                           tLfLfL1                              1LfLfLf.
+ *                          :LfLLLLf.                            ;LfLLfLf.
+ *                          :LfLLLfL;.,,:;;;;i1111111ttt1111111i;fLfLLLLL,
+ *                          tLfLLLLLffLLLLLLLLLLLLLLLLLLLLLLLLLLLLfLLLLLLft1i:,
+ *                      .:itfLLLLLLLLLLfffffffffffffffffffffffffffLLLLLLLLLLLLLf1;,
+ *                   .;1fLLLLLLLLLLLfLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLfffffLLLLLf1:.
+ *                 ,1fLLLfffLLLLLLLLfLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLffffLLLf1,
+ *              .;tLLLfffLLLLLLLLLLLfLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLfffLLLt;.
+ *             :fLLffLLLLLLLLLLLLLLLfLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLfffLCf;
+ *           .tLLffLLLLLLLLLLLLLLLLLfLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLfLi1L1.
+ *          :fLffLLLLLLLLLLLLLLLLLLLfLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLfL1. ;Lf,
+ *         ;LLfLLLLLfffffffffLLLLLLLfLLLLLLLLLLLLfffffffffffffffffffffLLLLLLLLLLLLLLLLLfL.   fLf.
+ *        ,LLfLLLLLfLLLLLLLLLLLLffffffffffffffLLLLLLLLLLLLLLLLLLLLLLLLfLLLLLLLLLLLLLLLfLf,   ;LLt
+ *        tLfLLLLLLL1i1111ftffLLLLLLLLLLLLLLLLLLLffft1111;;;i:::::::ifLfLLLLLLLLLLLLLLfLt    :Lff.
+ *       :LfLLLLLfLi         ...,::;i;;;;::::,....                    ;LfLLLLLLLLLLLLLfLf.   :Lff.
+ *       ,LffLLLLfL:                                                   iLfLLLLLLLLLLLLfLt.   :fLt
+ *        iLffLLLfL;                                                    fLfLLLLLLLLLLLfLf.   1Ct.
+ *         ;LLfLLfLt                                      ...,::::,..   tLfLLLLLLLLLLLfLf.  :Lt.
+ *          :LLfLLfL:  .:i;;i;:,                        :t111iiiitf1,  :LfLLLLLLLLLLLLfLf. ,Li
+ *           :fLLffLf, :i:::::::                 .,::f:               .tLfLLLLLLLLLLLffLf:i1:
+ *             ifLLfLf,                  ::,,,:;;;i:if.              ,tLfLLLLLLLLffffLLLLt:
+ *              .;tLLLLi.                :iii;;;;::::.             ,1fLfLfffffffLLLLLf1:.
+ *                 :1tLCL1;,.                                .,:;1tLLffLLLLLLLLLft1;,
+ *                    ,:1fLLfft11i;:::::::,,,,,,:;;;;;;i11ttffLCCCLLLLLLLfft1i;,.
+ *                         .,::iii1tttttftLLLLLLLLLLLLLLLLLLLf1;;:::::,..
+ *                                      ,1fLffffffffffffffffLff1,
+ *                                    ,iLLLfLLLLLLLLLLLLLLLLLLLLLt,
+ *                                   iLLLLfLLLLLLLLLLLLLLLLLLL1fLLL;
+ *                                 ,fLfLf:1LfLLLLLLLLLLLLLLLfLt.fLLCt
+ *                                it1fL1.,LfLLLLLLLLLLLLLLLLfLt .tftLt.
+ *                              :fLffLt  tLfLLLLLLLLLLLLLLLLLLf, .ttfLf;
+ *                             :LLffLf, ,LffffffffffffffffffLfL;  ;LffLLi
+ *                            :LLLLLf,  1LLLLLLLLLLLLLLLLLLLLLLt   1LLLLC1
+ *                           .ffffff:  .ffffffffffffffffffffffff,   tfffffi
+ */
+
 // Core imports
 import {Wyrd} from "./Wyrd.sol";
 
@@ -10,8 +59,9 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // Library imports
-import {FixedPointMathLib as FPML} from "solady/utils/FixedPointMathLib.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {FixedPointMathLib as FPML} from "solady/utils/FixedPointMathLib.sol";
+import {SafeTransferLib as STL} from "solady/utils/SafeTransferLib.sol";
 
 // Local imports
 import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from "./lib/models.sol";
@@ -53,15 +103,14 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
     event UserRegistered(bytes32 indexed secret, address indexed addr);
     event TokenNotSupported(address indexed token, string reason);
 
-    // Errors
+    /* ▀▀▀ Errors ▀▀▀ */
     error InvalidGame();
     error InvalidGameID();
     error InvalidAmount();
-    error InvalidProvider();
+    error InvalidInput();
     error InvalidPrediction();
     error InvalidNFTOwnership(address player, uint256 nft_id);
     error InvalidGameStatus(uint256 game_id, GameStatus current, GameStatus required);
-
     error InsufficientBalance(uint256 balance, uint256 required, address addr);
     error RegistrationFailed(string reason);
 
@@ -72,13 +121,22 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         address _provider,
         address _marketing_wallet,
         uint256[2] memory _sav_pk
-    ) Wyrd(7, _provider, _entropy, _provider, _sav_pk) {
+    ) Wyrd(7, _provider, _entropy, _provider, _sav_pk, false) {
+        if (
+            _nft_contract == address(0) || _token_contract == address(0) || _entropy == address(0) || _provider == address(0)
+                || _marketing_wallet == address(0)
+        ) {
+            revert InvalidInput();
+        }
+
         _initializeOwner(msg.sender);
         _grantRoles(msg.sender, ROLE_OPERATOR);
         NFT_CONTRACT = IERC721(_nft_contract);
         TOKEN_CONTRACT = IERC20(_token_contract);
         marketing_wallet = _marketing_wallet;
     }
+
+    /* ▀▀▀ View/Pure Functions ▀▀▀ */
 
     function get_current_game_id() external view returns (uint256) {
         return _current_game_id;
@@ -118,12 +176,12 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         return game.alpha_prefix ^ bytes32(uint256(uint160(game.players[0].addr) ^ uint160(game.players[1].addr)) ^ game_id);
     }
 
+    function get_alpha(uint256 game_id) public view override returns (bytes32) {
+        return compute_alpha(game_id);
+    }
+
     /**
-     * @notice Calculates the betting book for a particular game
-     * @dev In sports betting and gambling terminology, a "book" refers to the collection
-     * of all bets (speculations) placed on an event, along with the odds and liquidity
-     * for each side. This function calculates the current state of the betting book,
-     * including odds and market depth (liquidity) for each player.
+     * @notice Calculates the current state of the betting book for a particular game
      * @param game_id The ID of the game to calculate the book for
      * @return p1_odds The odds for player 1 (ratio of p1_depth to p2_depth)
      * @return p2_odds The odds for player 2 (ratio of p2_depth to p1_depth)
@@ -135,13 +193,11 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         Speculation[] memory specs = _games[game_id].speculations;
         uint256 specs_length = specs.length;
 
-        // Initialize depths
         p1_depth = 0;
         p2_depth = 0;
 
-        // Single loop to calculate depths
+        // calc depths
         unchecked {
-            // Safe because we're only adding positive amounts
             for (uint256 i; i < specs_length; ++i) {
                 if (specs[i].prediction) {
                     p1_depth += specs[i].amount;
@@ -151,7 +207,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             }
         }
 
-        // Calculate odds
+        // calc odds
         if (p1_depth != 0 && p2_depth != 0) {
             p1_odds = FPML.divWad(p1_depth, p2_depth);
             p2_odds = FPML.divWad(p2_depth, p1_depth);
@@ -161,6 +217,8 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             p2_odds = 0;
         }
     }
+
+    /* ▀▀▀ ??? ▀▀▀ */
 
     function register(bytes32 secret) external {
         if (TOKEN_CONTRACT.allowance(msg.sender, address(this)) < MAX_ALLOWANCE) {
@@ -178,8 +236,10 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         // validate
         _validate_player(players[0]);
         _validate_player(players[1]);
-        TOKEN_CONTRACT.transferFrom(players[0].addr, address(this), amount);
-        TOKEN_CONTRACT.transferFrom(players[1].addr, address(this), amount);
+        if (players[0].nft_id == players[1].nft_id) revert InvalidInput(); // no onka can play itself
+
+        STL.safeTransferFrom(address(TOKEN_CONTRACT), players[0].addr, address(this), amount);
+        STL.safeTransferFrom(address(TOKEN_CONTRACT), players[1].addr, address(this), amount);
 
         // new game
         _current_game_id++;
@@ -189,7 +249,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             amount: amount,
             status: GameStatus.OPEN,
             speculations: new Speculation[](0),
-            handle: 0,
+            bet_pool: 0,
             p1_wins: 0,
             p2_wins: 0,
             rounds: new RoundResult[](5),
@@ -206,11 +266,11 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
 
         // transfer
         if (amount == 0) revert InvalidAmount();
-        TOKEN_CONTRACT.transferFrom(speculator, address(this), amount);
+        STL.safeTransferFrom(address(TOKEN_CONTRACT), speculator, address(this), amount);
 
         // save state
         game.speculations.push(Speculation({speculator: speculator, prediction: prediction, amount: amount}));
-        game.handle += amount;
+        game.bet_pool += amount;
 
         emit BetPlaced(game_id, speculator, prediction, amount);
     }
@@ -230,19 +290,19 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         emit GameStarted(game_id);
     }
 
-    function exec_game(uint256 game_id, bytes32 random_number) public {
+    function exec_game(uint256 game_id, bytes32 random_number) public onlyRolesOrOwner(ROLE_OPERATOR) {
         GameData storage game = _get_validated_game(game_id, GameStatus.ACTIVE);
         game.status = GameStatus.UNSETTLED;
         uint8 p1_wins = 0;
         uint8 p2_wins = 0;
-        uint256 p1_health = INITIAL_HEALTH;
-        uint256 p2_health = INITIAL_HEALTH;
+        // uint256 p1_health = INITIAL_HEALTH;
+        // uint256 p2_health = INITIAL_HEALTH;
         bytes32 r = random_number;
         RoundResult[] memory rounds = new RoundResult[](BATTLE_ROUNDS);
         // Simulate rounds until one player wins 3 times
         for (uint8 round; round < BATTLE_ROUNDS && p1_wins < WINS_REQUIRED && p2_wins < WINS_REQUIRED; ++round) {
             // Generate two dice rolls (1-6) from the current random number
-            // TODO: optimize
+            // TODO: optimize, maybe switch to XOR
             r = keccak256(abi.encodePacked(r, round));
             uint8 roll_p1 = uint8(uint256(r) % 6) + 1;
             r = keccak256(abi.encodePacked(r, round + 1));
@@ -258,19 +318,26 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
 
             bool roll_w0 = roll_p1 > roll_p2;
 
-            // Record round result
-            rounds[round] = RoundResult({roll_p1: roll_p1, roll_p2: roll_p2, p1_won: roll_w0});
-
-            // Update wins and health
+            // wins and health
             if (roll_w0) {
                 p1_wins++;
-                p2_health = (WINS_REQUIRED - p1_wins) * HEALTH_PER_LIFE;
+                // p2_health = (WINS_REQUIRED - p1_wins) * HEALTH_PER_LIFE;
             } else {
                 p2_wins++;
-                p1_health = (WINS_REQUIRED - p2_wins) * HEALTH_PER_LIFE;
+                // p1_health = (WINS_REQUIRED - p2_wins) * HEALTH_PER_LIFE;
+            }
+            rounds[round] = RoundResult({roll_p1: roll_p1, roll_p2: roll_p2, p1_won: roll_w0});
+        }
+
+        uint8 rounds_played = p1_wins + p2_wins;
+        RoundResult[] memory actual_rounds = new RoundResult[](rounds_played);
+        unchecked {
+            for (uint8 i = 0; i < rounds_played; i++) {
+                actual_rounds[i] = rounds[i];
             }
         }
-        game.rounds = rounds;
+
+        game.rounds = actual_rounds;
         game.p1_wins = p1_wins;
         game.p2_wins = p2_wins;
 
@@ -289,62 +356,53 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
     function end_game(uint256 game_id) public nonReentrant onlyRolesOrOwner(ROLE_OPERATOR) {
         // validate
         GameData memory game = _get_validated_game(game_id, GameStatus.UNSETTLED);
+        bool w0 = game.p1_wins > game.p2_wins ? true : false; // winner idx (0 for p1, 1 for p2)
 
-        // Determine winner (0 for p1, 1 for p2)
-        bool w0 = game.p1_wins > game.p2_wins ? true : false;
+        // calculate rake, winnings (players&speculators)
+        // bet payouts = if one-sided pool, refund. else, payout_pool = pool - rake, distribute proportional to winner weight
+        uint256 player_payout = game.amount * 2;
+        uint256 player_rake;
+        uint256 bet_rake;
+        uint256 pool = game.bet_pool;
+
+        (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) = calc_book(game_id);
+        bool valid_pool = pool != 0 && p1_odds != 0 && p2_odds != 0; // or p1_depth != 0 && p2_depth != 0, simpler
+        uint256 winning_pool = w0 ? p1_depth : p2_depth;
+
+        if (_revshare_enabled) {
+            player_rake = FPML.fullMulDiv(player_payout, _bps_revenue, BPS_DENOMINATOR);
+            bet_rake = valid_pool ? FPML.fullMulDiv(pool, _bps_revenue, BPS_DENOMINATOR) : 0;
+            player_payout -= player_rake;
+            pool -= bet_rake;
+        }
 
         _games[game_id].status = GameStatus.COMPLETED;
-        // calculate rake, winnings (players&speculators)
-        {
-            // Handle payouts
-            // player payouts = 2 player game amount - rake
-            // bet payouts = if one-sided pool, refund. else, payout_pool = sidepool - rake, distribute proportional to winner pool weight
-            uint256 player_payout = game.amount * 2;
-            // uint256 sidepool = game.handle;
-            uint256 player_rake;
-            uint256 bet_rake;
-            // uint256 sidepool_payout;
-            uint256 handle = game.handle;
+        _active_game_ids.remove(game_id);
 
-            (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) = calc_book(game_id);
-            bool valid_handle = handle != 0 && p1_odds != 0 && p2_odds != 0;
-            uint256 winning_pool = w0 ? p1_depth : p2_depth;
-
-            if (_revshare_enabled) {
-                player_rake = FPML.fullMulDiv(player_payout, _bps_revenue, BPS_DENOMINATOR);
-                bet_rake = valid_handle ? FPML.fullMulDiv(handle, _bps_revenue, BPS_DENOMINATOR) : 0;
-
-                player_payout -= player_rake;
-                handle -= bet_rake;
-            }
-            TOKEN_CONTRACT.transfer(game.players[w0 ? 0 : 1].addr, player_payout);
-
-            // Handle speculation payouts
-
-            if (!valid_handle) {
-                _refund_speculations(_games[game_id]);
-            } else {
-                Speculation[] memory specs = game.speculations;
-                uint256 spec_length = specs.length;
-                for (uint256 i; i < spec_length; ++i) {
-                    if (specs[i].prediction == w0) {
-                        uint256 weight = FPML.divWad(specs[i].amount, winning_pool);
-                        uint256 payout = FPML.mulWad(handle, weight);
-                        TOKEN_CONTRACT.transfer(specs[i].speculator, payout);
-                    }
+        // payouts
+        STL.safeTransfer(address(TOKEN_CONTRACT), game.players[w0 ? 0 : 1].addr, player_payout);
+        if (!valid_pool) {
+            _refund_speculations(_games[game_id]);
+        } else {
+            Speculation[] memory specs = game.speculations;
+            uint256 spec_length = specs.length;
+            for (uint256 i; i < spec_length; ++i) {
+                if (specs[i].prediction == w0) {
+                    uint256 weight = FPML.divWad(specs[i].amount, winning_pool);
+                    uint256 payout = FPML.mulWad(pool, weight);
+                    STL.safeTransfer(address(TOKEN_CONTRACT), specs[i].speculator, payout);
                 }
             }
-
-            if (_revshare_enabled) {
-                TOKEN_CONTRACT.transfer(marketing_wallet, bet_rake + player_rake);
-            }
         }
+        if (_revshare_enabled) STL.safeTransfer(address(TOKEN_CONTRACT), marketing_wallet, bet_rake + player_rake);
+
+
+        // event
+        uint8 rlen = uint8(game.rounds.length);
         RoundResult[BATTLE_ROUNDS] memory rounds;
-        uint256 r_len = game.rounds.length;
-        for (uint8 i; i < r_len; ++i) {
+        for (uint8 i; i < rlen; ++i) {
             rounds[i] = game.rounds[i];
         }
-        _active_game_ids.remove(game_id);
         emit GameCompleted(game_id, uint8(w0 ? 0 : 1), rounds);
     }
 
@@ -356,14 +414,14 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         uint256 amount = game.amount;
         if (status == GameStatus.COMPLETED || status == GameStatus.CANCELLED) return; // No-op if game completed or cancelled
 
-        // process refunds
-        TOKEN_CONTRACT.transfer(game.players[0].addr, amount); // TODO: review gas?
-        TOKEN_CONTRACT.transfer(game.players[1].addr, amount);
-        _refund_speculations(game);
-
         // save state
         game.status = GameStatus.CANCELLED;
         _active_game_ids.remove(game_id);
+
+        // process refunds
+        STL.safeTransfer(address(TOKEN_CONTRACT), game.players[0].addr, amount);
+        STL.safeTransfer(address(TOKEN_CONTRACT), game.players[1].addr, amount);
+        _refund_speculations(game);
 
         emit GameAborted(game_id);
     }
@@ -377,7 +435,9 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
     }
 
     function _validate_player(Player memory player) internal view {
-        if (NFT_CONTRACT.ownerOf(player.nft_id) != player.addr) {
+        try NFT_CONTRACT.ownerOf(player.nft_id) returns (address owner) {
+            if (owner != player.addr) revert InvalidNFTOwnership(player.addr, player.nft_id);
+        } catch {
             revert InvalidNFTOwnership(player.addr, player.nft_id);
         }
     }
@@ -394,7 +454,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         uint256 length = specs.length;
         unchecked {
             for (uint256 i; i < length; ++i) {
-                TOKEN_CONTRACT.transfer(specs[i].speculator, specs[i].amount);
+                STL.safeTransfer(address(TOKEN_CONTRACT), specs[i].speculator, specs[i].amount);
             }
         }
     }

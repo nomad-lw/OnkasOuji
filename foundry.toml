@@ -16,7 +16,7 @@ remappings = [
 # testing
 verbosity = 3
 no-match-path = "test/*"
-skip=[".t.sol",'.sol']
+# skip=[".t.sol",'.sol']
 
 # [profile.default.optimizer_details]
 # yul = true
