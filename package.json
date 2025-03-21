@@ -14,6 +14,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@pythnetwork/entropy-sdk-solidity": "^1.5.0"
+    "@pythnetwork/entropy-sdk-solidity": "^1.5.0",
+    "viem": "^2.23.13",
+    "vrf-ts-256": "^1.0.0"
   }
 }

@@ -396,7 +396,6 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         }
         if (_revshare_enabled) STL.safeTransfer(address(TOKEN_CONTRACT), marketing_wallet, bet_rake + player_rake);
 
-
         // event
         uint8 rlen = uint8(game.rounds.length);
         RoundResult[BATTLE_ROUNDS] memory rounds;

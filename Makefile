@@ -1,9 +1,18 @@
 -include .env
 
-.PHONY: deploy-testnet deploy setup setup-testnet snapshot-testnet snapshot test-testnet
+.PHONY: deploy-testnet deploy setup setup-testnet snapshot-testnet snapshot test-testnet build
+
+
+build:
+	@echo "Building All Contracts..."
+	@forge build --no-cache
+
+build-essential: src/Wyrd.sol src/OnkasOujiGame.sol
+	@forge build src/Wyrd.sol src/OnkasOujiGame.sol \
+	    --force -vvv
 
 deploy-testnet: script/Deploy.s.sol
-	forge script script/Deploy.s.sol:DeployScript \
+	@forge script script/Deploy.s.sol:DeployScript \
 		--rpc-url ${TESTNET_RPC_URL} \
 		--verifier blockscout \
         --verifier-url 'https://sanko-arb-sepolia.explorer.caldera.xyz/api/' \

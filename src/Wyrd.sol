@@ -125,7 +125,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     event SAVPublicKeyUpdated(uint256[2] newPublicKey);
 
     /* ▀▀▀ Errors ▀▀▀ */
-    error InvalidVRFProof();
+    error InvalidVRFProof(string);
     error InvalidRequest();
     error RequestCollision(uint256 req_id);
     error UnauthorizedCaller();
@@ -137,7 +137,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
         require(_randomizer != address(0), "Invalid randomizer");
 
         _initializeOwner(msg.sender);
-        _grantRoles(msg.sender, ROLE_SAV_PROVER);
+        _grantRoles(msg.sender, ROLE_OPERATOR | ROLE_SAV_PROVER);
 
         pyth_enabled = (_flags & FLAG_PYTH) != 0;
         randomizer_enabled = (_flags & FLAG_RANDOMIZER) != 0;
@@ -164,14 +164,35 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
         return (uint256(fee_pyth) + fee_randomizer, fee_pyth, fee_randomizer);
     }
 
+    /**
+     * @notice Returns the status of a random number request
+     * @dev A request is considered active if there are pending provider callbacks
+     * @param req_id The ID of the request to check
+     * @return active True if the request is active (pending callbacks), false if it was never made or is completed
+     * @return remaining_sources Bitfield of remaining sources that have not yet provided randomness
+     */
     function get_request_status(uint256 req_id) public view returns (bool active, uint8 remaining_sources) {
         uint8 status = req_executions[req_id];
-        return (status == 0, status);
+        return (status != 0, status);
     }
 
+    /**
+     * @notice Returns the random value generated for a specific request
+     * @dev Reverts if status is completed but the random value is zero
+     * @param req_id The ID of the request to retrieve
+     * @return rand The random value generated
+     * @return completed Whether the request is complete (all sources have provided randomness)
+     */
     function get_random_value(uint256 req_id) external view returns (bytes32 rand, bool completed) {
         completed = req_executions[req_id] == 0;
-        return (req_rand[req_id], completed);
+        rand = req_rand[req_id];
+
+        // If the request was never made, revert
+        if (!completed && rand == bytes32(0)) {
+            revert InvalidRequest();
+        }
+
+        return (rand, completed);
     }
 
     function get_alpha(uint256 req_id) public view virtual returns (bytes32) {
@@ -285,7 +306,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     }
 
     function verify_beta(uint256[4] memory _proof, bytes memory _beta) public view returns (bool) {
-        return VRF.verify(SAV_PUB_KEY, _proof, abi.encodePacked(_beta));
+        return VRF.verify(SAV_PUB_KEY, _proof, _beta);
     }
 
     /**
@@ -302,10 +323,10 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
             revert("SAV must be last callback: other providers have not completed");
         }
         bytes32 original_alpha = get_alpha(req_id);
-        if (keccak256(_alpha) != keccak256(abi.encodePacked(original_alpha))) revert InvalidVRFProof(); // verify alpha
+        if (keccak256(abi.encodePacked(bytes32(_alpha))) != keccak256(abi.encodePacked(original_alpha))) revert InvalidVRFProof("alpha mismatch"); // verify alpha
 
-        if (decoded_proof_to_hash(_proof) != beta) revert InvalidVRFProof();
-        if (!VRF.fastVerify(SAV_PUB_KEY, _proof, _alpha, _U, _V)) revert InvalidVRFProof();
+        if (decoded_proof_to_hash(_proof) != beta) revert InvalidVRFProof("proof mismatch");
+        if (!VRF.fastVerify(SAV_PUB_KEY, _proof, _alpha, _U, _V)) revert InvalidVRFProof("verification failed");
         process_callback(req_id, req_id, FLAG_SAV, beta);
     }
 
@@ -386,7 +407,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
         }
         req_executions[req_id] ^= src_flag;
         // req_rand[req_id] ^= beta;
-        req_rand[req_id] = keccak256(abi.encodePacked(req_rand[req_id], beta)); // preimage resistance
+        req_rand[req_id] = keccak256(abi.encodePacked(req_rand[req_id], beta)); // replacing XOR for preimage resistance
         emit RandomnessGenerated(req_id, src_flag);
         if (req_executions[req_id] == 0) {
             emit RequestCompleted(req_id);

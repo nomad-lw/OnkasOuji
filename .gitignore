@@ -17,3 +17,8 @@ node_modules
 
 # Temporary files
 _*.sol
+
+# Rust
+**/target/
+**/*.rs.bk
+**/Cargo.lock
