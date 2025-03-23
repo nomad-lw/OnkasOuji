@@ -131,17 +131,24 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     error UnauthorizedCaller();
     error InsufficientFee(uint256 fee_supplied, uint256 required);
 
-    constructor(uint8 _flags, address _pyth_provider, address _pyth_entropy, address _randomizer, uint256[2] memory _sav_pk, bool _store_alpha) {
-        require(_pyth_provider != address(0), "Invalid Pyth provider");
-        require(_pyth_entropy != address(0), "Invalid Pyth entropy");
-        require(_randomizer != address(0), "Invalid randomizer");
-
+    constructor(uint8 _flags, address _pyth_entropy, address _pyth_provider, address _randomizer, uint256[2] memory _sav_pk, bool _store_alpha) {
         _initializeOwner(msg.sender);
         _grantRoles(msg.sender, ROLE_OPERATOR | ROLE_SAV_PROVER);
 
         pyth_enabled = (_flags & FLAG_PYTH) != 0;
         randomizer_enabled = (_flags & FLAG_RANDOMIZER) != 0;
         sav_enabled = (_flags & FLAG_SAV) != 0;
+
+        if (pyth_enabled) {
+            require(_pyth_provider != address(0), "Invalid Pyth provider");
+            require(_pyth_entropy != address(0), "Invalid Pyth entropy");
+        }
+        if (randomizer_enabled) {
+            require(_randomizer != address(0), "Invalid Randomizer address");
+        }
+        if (sav_enabled) {
+            require(_sav_pk[0] != 0 && _sav_pk[1] != 0, "Invalid SAV public key");
+        }
 
         PYTH_ENTROPY = IEntropy(_pyth_entropy);
         PYTH_PROVIDER = _pyth_provider;
@@ -183,12 +190,12 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
      * @return rand The random value generated
      * @return completed Whether the request is complete (all sources have provided randomness)
      */
-    function get_random_value(uint256 req_id) external view returns (bytes32 rand, bool completed) {
+    function get_random_value(uint256 req_id) public view returns (bytes32 rand, bool completed) {
         completed = req_executions[req_id] == 0;
         rand = req_rand[req_id];
 
         // If the request was never made, revert
-        if (!completed && rand == bytes32(0)) {
+        if (completed && rand == bytes32(0)) {
             revert InvalidRequest();
         }
 

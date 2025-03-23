@@ -113,19 +113,19 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
     error InvalidGameStatus(uint256 game_id, GameStatus current, GameStatus required);
     error InsufficientBalance(uint256 balance, uint256 required, address addr);
     error RegistrationFailed(string reason);
+    error GameExecNotReady();
 
+    // note: token ($GOLD) is assumed to have 18 decimals
     constructor(
         address _nft_contract,
         address _token_contract,
-        address _entropy,
-        address _provider,
-        address _marketing_wallet,
-        uint256[2] memory _sav_pk
-    ) Wyrd(7, _provider, _entropy, _provider, _sav_pk, false) {
-        if (
-            _nft_contract == address(0) || _token_contract == address(0) || _entropy == address(0) || _provider == address(0)
-                || _marketing_wallet == address(0)
-        ) {
+        address _pyth_entropy,
+        address _pyth_provider,
+        address _randomizer,
+        uint256[2] memory _sav_pk,
+        address _marketing_wallet
+    ) Wyrd(7, _pyth_entropy, _pyth_provider, _randomizer, _sav_pk, false) {
+        if (_nft_contract == address(0) || _token_contract == address(0) || _marketing_wallet == address(0)) {
             revert InvalidInput();
         }
 
@@ -236,7 +236,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         // validate
         _validate_player(players[0]);
         _validate_player(players[1]);
-        if (players[0].nft_id == players[1].nft_id) revert InvalidInput(); // no onka can play itself
+        if (players[0].nft_id == players[1].nft_id) revert InvalidInput(); // no onka can play itself, though this should be impossible anyway
 
         STL.safeTransferFrom(address(TOKEN_CONTRACT), players[0].addr, address(this), amount);
         STL.safeTransferFrom(address(TOKEN_CONTRACT), players[1].addr, address(this), amount);
@@ -260,6 +260,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         emit GameCreated(game_id, players, amount);
     }
 
+    // prediction value: false for p1, true for p2
     function place_bet(uint256 game_id, address speculator, bool prediction, uint256 amount) external onlyRolesOrOwner(ROLE_OPERATOR) {
         // validate
         GameData storage game = _get_validated_game(game_id, GameStatus.OPEN);
@@ -290,14 +291,15 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         emit GameStarted(game_id);
     }
 
-    function exec_game(uint256 game_id, bytes32 random_number) public onlyRolesOrOwner(ROLE_OPERATOR) {
+    function exec_game(uint256 game_id) public onlyRolesOrOwner(ROLE_OPERATOR) {
         GameData storage game = _get_validated_game(game_id, GameStatus.ACTIVE);
         game.status = GameStatus.UNSETTLED;
         uint8 p1_wins = 0;
         uint8 p2_wins = 0;
-        // uint256 p1_health = INITIAL_HEALTH;
-        // uint256 p2_health = INITIAL_HEALTH;
-        bytes32 r = random_number;
+
+        (bytes32 r, bool ready) = get_random_value(game_id);
+        if (!ready) revert GameExecNotReady();
+
         RoundResult[] memory rounds = new RoundResult[](BATTLE_ROUNDS);
         // Simulate rounds until one player wins 3 times
         for (uint8 round; round < BATTLE_ROUNDS && p1_wins < WINS_REQUIRED && p2_wins < WINS_REQUIRED; ++round) {

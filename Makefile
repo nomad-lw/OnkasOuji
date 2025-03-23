@@ -1,6 +1,6 @@
 -include .env
 
-.PHONY: deploy-testnet deploy setup setup-testnet snapshot-testnet snapshot test-testnet build
+.PHONY: deploy-testnet deploy setup setup-testnet snapshot-testnet snapshot test-testnet build test
 
 
 build:
@@ -10,6 +10,9 @@ build:
 build-essential: src/Wyrd.sol src/OnkasOujiGame.sol
 	@forge build src/Wyrd.sol src/OnkasOujiGame.sol \
 	    --force -vvv
+
+test:
+	@forge test -v
 
 deploy-testnet: script/Deploy.s.sol
 	@forge script script/Deploy.s.sol:DeployScript \

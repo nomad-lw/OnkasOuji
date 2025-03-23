@@ -14,9 +14,9 @@ address constant ADDR_DEPLOYER = address(0x1337F000);
 address constant ADDR_OPERATOR = address(0x1337F001);
 
 // providers
-address constant ADDR_RANDOMIZER = address(0x1337F002);
+address constant ADDR_RANDOMIZER = address(0x1337F002); // wont be used unless etching w/cheatcode
 address constant ADDR_SAV_PROVER = address(0x1337F003);
-address constant ADDR_PYTH_ENTROPY = address(0x1337F004);
+address constant ADDR_PYTH_ENTROPY = address(0x1337F004); // wont be used unless etching w/cheatcode
 address constant ADDR_PYTH_PROVIDER = address(0x1337F005);
 // address constant ADDR_RANDOMIZER = 0xe360c1285E2ECB36C16faFa62e86B30AB5fb7dB3;
 // address constant ADDR_PYTH_ENTROPY = 0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb;
@@ -24,3 +24,13 @@ address constant ADDR_PYTH_PROVIDER = address(0x1337F005);
 bytes32 constant SAV_PROVER_SK = VRFTestData.SECRET_KEY;
 uint256 constant SAV_PROVER_PK_X = VRFTestData.PUBLIC_KEY_X;
 uint256 constant SAV_PROVER_PK_Y = VRFTestData.PUBLIC_KEY_Y;
+
+// players
+address constant ADDR_PLAYER_1 = address(0xBEE75001);
+address constant ADDR_PLAYER_2 = address(0xBEE75002);
+address constant ADDR_PLAYER_3 = address(0xBEE75003);
+address constant ADDR_PLAYER_4 = address(0xBEE75004);
+address constant ADDR_BETOOR_1 = address(0xBEE75005);
+address constant ADDR_BETOOR_2 = address(0xBEE75006);
+address constant ADDR_BETOOR_3 = address(0xBEE75007);
+address constant ADDR_MARKETING = address(0xBEE75999);

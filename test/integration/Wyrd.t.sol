@@ -4,17 +4,17 @@ pragma solidity ^0.8.28;
 import {Test, console} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {Wyrd} from "src/Wyrd.sol";
+
 import "test/config.sol" as cfg;
 import {VRFTestData} from "test/utils/VRFTestData.sol";
 
-import {MockPythEntropy} from "test/mocks/MockRandomProviders.t.sol";
-import {MockRandomizer} from "test/mocks/MockRandomProviders.t.sol";
+import {MockPythEntropy, MockRandomizer} from "test/mocks/MockRandomProviders.t.sol";
 import {IEntropy} from "@pythnetwork/entropy-sdk-solidity/IEntropy.sol";
 import {IRandomizer} from "src/interfaces/ext/IRandomizer.sol";
 
 contract TestableWyrd is Wyrd {
-    constructor(uint8 _flags, address _pyth_provider, address _pyth_entropy, address _randomizer, uint256[2] memory _sav_pk, bool _store_alpha)
-        Wyrd(_flags, _pyth_provider, _pyth_entropy, _randomizer, _sav_pk, _store_alpha)
+    constructor(uint8 _flags, address _pyth_entropy, address _pyth_provider, address _randomizer, uint256[2] memory _sav_pk, bool _store_alpha)
+        Wyrd(_flags, _pyth_entropy, _pyth_provider, _randomizer, _sav_pk, _store_alpha)
     {}
 
     function request_random(uint256 req_id, bytes32 alpha) external payable {
@@ -33,6 +33,10 @@ contract TestableWyrd is Wyrd {
     function get_store_alpha_inputs() external view returns (bool) {
         return STORE_ALPHA_INPUTS;
     }
+}
+
+interface IMockEntropy is IEntropy {
+    function triggerCallback(uint64 sequenceNumber) external;
 }
 
 contract WyrdTests is Test {
@@ -57,8 +61,8 @@ contract WyrdTests is Test {
         vm.prank(cfg.ADDR_DEPLOYER);
         wyrd = new TestableWyrd(
             cfg.FLAG_ALL_SOURCES,
-            cfg.ADDR_PYTH_PROVIDER,
             address(mock_pyth_entropy),
+            cfg.ADDR_PYTH_PROVIDER,
             address(mock_randomizer),
             [cfg.SAV_PROVER_PK_X, cfg.SAV_PROVER_PK_Y],
             true
@@ -265,6 +269,13 @@ contract WyrdTests is Test {
             bytes32 stored_alpha = wyrd.get_alpha(req_id);
             assertEq(stored_alpha, alpha, "Stored alpha doesn't match request alpha");
         }
+    }
+
+    function process_request_pyth(address pyth, uint64 sequence_num) public {
+        // Add function signature to IEntropy interface
+        vm.prank(cfg.ADDR_PYTH_PROVIDER);
+        IMockEntropy pyth_entropy = IMockEntropy(pyth);
+        pyth_entropy.triggerCallback(sequence_num);
     }
 
     function test_request_and_all_provider_callbacks() public {
