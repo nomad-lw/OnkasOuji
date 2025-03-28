@@ -1,35 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity ^0.8.26;
 
+import {Test, console} from "forge-std/Test.sol";
 import {VRF} from "vrf-solidity/contracts/VRF.sol";
+import {LibString as Strings} from "solady/utils/LibString.sol";
+import {stdJson} from "forge-std/StdJson.sol";
 
-library VRFTestData {
-    // // Public key components as separate constants
-    // uint256 internal constant SAV_PUBLIC_KEY_X = 0x2c8c31fc9f990c6b55e3865a184a4ce50e09481f2eaeb3e60ec1cea13a6ae645;
-    // uint256 internal constant SAV_PUBLIC_KEY_Y = 0x64b95e4fdb6948c0386e189b006a29f686769b011704275e4459822dc3328085;
+contract VRFTestData is Test {
+    using stdJson for string;
 
-    // // Proof components as separate constants
-    // uint256 internal constant PROOF_GAMMA_X = 0x1f4dbca087a1972d04a07a779b7df1caa99e0f5db2aa21f3aecc4f9e10e85d08;
-    // uint256 internal constant PROOF_GAMMA_Y = 0x21b6e2439257f7488de301945cdd2c9959c1ed2f58766dd3c958b38c9f37792f;
-    // uint256 internal constant PROOF_C = 0x14faa89697b482daa377fb6b4a8b0191;
-    // uint256 internal constant PROOF_S = 0xa65d34a6d90a8a2461e5db9205d4cf0bb4b2c31b5ef6997a585a9f1a72517b6f;
+    bytes32 public immutable SECRET_KEY;
 
-    // bytes32 internal constant BETA = 0x612065e309e937ef46c2ef04d5886b9c6efd2991ac484ec64a9b014366fc5d81;
+    // uint256 public constant PUBLIC_KEY_X = 20149468923017862635785269351026469201343513335253737999994330121872194856517;
+    // uint256 public constant PUBLIC_KEY_Y = 45558802482409728232371975206855032011893935284936184167394243449917294149765;
 
-    // // Helper function to get public key as array
-    // function get_public_key() internal pure returns (uint256[2] memory) {
-    //     return [SAV_PUBLIC_KEY_X, SAV_PUBLIC_KEY_Y];
-    // }
+    struct VrfDatai {
+        bytes32 hash;
+        bytes32 message;
+        bytes proof;
+        bytes public_key;
+        uint256 secret_key;
+    }
 
-    // // Helper function to get proof as array
-    // function get_proof() internal pure returns (uint256[4] memory) {
-    //     return [PROOF_GAMMA_X, PROOF_GAMMA_Y, PROOF_C, PROOF_S];
-    // }
+    struct VrfData {
+        bytes32 hash;
+        uint256 message;
+        bytes proof;
+        bytes public_key;
+        uint256 secret_key;
+    }
 
-    bytes32 public constant SECRET_KEY = 0xe95387163cb7fef63eb29ff777082649e5501e9069da9ff36c8c038b4f0207f2; //?
-
-    uint256 public constant PUBLIC_KEY_X = 20149468923017862635785269351026469201343513335253737999994330121872194856517;
-    uint256 public constant PUBLIC_KEY_Y = 45558802482409728232371975206855032011893935284936184167394243449917294149765;
+    constructor() {
+        SECRET_KEY = bytes32(vm.envBytes("VRF_SECRET_KEY"));
+        console.log("VRF_SECRET_KEY: ");
+        console.logBytes32(SECRET_KEY);
+    }
 
     function get_public_key_as_point() public pure returns (uint256[2] memory) {
         uint256[2] memory PUBLIC_KEY_XY = [
@@ -59,7 +64,7 @@ library VRFTestData {
         return VRF.computeFastVerifyParams(_publicKey, _proof, _message);
     }
 
-    function get_valid_vrf_proof()
+    function get_valid_static_vrf_proof()
         public
         pure
         returns (
@@ -70,7 +75,6 @@ library VRFTestData {
             bytes memory pi,
             bytes32 beta,
             uint256[4] memory proof,
-            uint256 precomputed_beta,
             bytes memory pub_bytes
         )
     {
@@ -92,8 +96,164 @@ library VRFTestData {
         proof = [gamma[0], gamma[1], 0x14faa89697b482daa377fb6b4a8b0191, 0xa65d34a6d90a8a2461e5db9205d4cf0bb4b2c31b5ef6997a585a9f1a72517b6f];
         // Beta is the hash of gamma point
         beta = VRF.gammaToHash(gamma[0], gamma[1]);
-        precomputed_beta = 0x612065e309e937ef46c2ef04d5886b9c6efd2991ac484ec64a9b014366fc5d81;
+        uint256 precomputed_beta = 0x612065e309e937ef46c2ef04d5886b9c6efd2991ac484ec64a9b014366fc5d81;
+        require(bytes32(precomputed_beta) == beta, "Incorrect beta");
         pub_bytes = hex"032c8c31fc9f990c6b55e3865a184a4ce50e09481f2eaeb3e60ec1cea13a6ae645";
+    }
+
+    function zero_pad_b32(bytes memory unaligned) public pure returns (bytes memory padded) {
+        if (unaligned.length % 32 == 0) {
+            return unaligned;
+        }
+        uint256 padding = 32 - (unaligned.length % 32);
+        padded = new bytes(unaligned.length + padding);
+        for (uint256 i = 0; i < unaligned.length; i++) {
+            padded[i + padding] = unaligned[i];
+        }
+    }
+
+    function bytes_to_hex_string(bytes memory b) public pure returns (string memory) {
+        string memory hexString = "";
+        for (uint256 i = 0; i < b.length; i++) {
+            hexString = string.concat(hexString, Strings.toHexStringNoPrefix(uint8(b[i]), 1));
+        }
+        return hexString;
+    }
+
+    function hexStringToBytes(string memory hexString) public pure returns (bytes memory) {
+        // Check if the string has '0x' prefix and remove it if present
+        bytes memory strBytes = bytes(hexString);
+        uint256 startIndex = 0;
+        if (strBytes.length >= 2 && strBytes[0] == "0" && (strBytes[1] == "x" || strBytes[1] == "X")) {
+            startIndex = 2;
+        }
+
+        // Calculate the length of the bytes array (each byte is represented by 2 hex characters)
+        uint256 len = (strBytes.length - startIndex) / 2;
+        bytes memory result = new bytes(len);
+
+        // Process each byte (2 hex characters)
+        for (uint256 i = 0; i < len; i++) {
+            uint8 highNibble = _hexCharToUint8(strBytes[startIndex + i * 2]);
+            uint8 lowNibble = _hexCharToUint8(strBytes[startIndex + i * 2 + 1]);
+            result[i] = bytes1(uint8((highNibble << 4) | lowNibble));
+        }
+
+        return result;
+    }
+
+    function _hexCharToUint8(bytes1 c) internal pure returns (uint8) {
+        if (uint8(c) >= uint8(bytes1("0")) && uint8(c) <= uint8(bytes1("9"))) {
+            return uint8(c) - uint8(bytes1("0"));
+        }
+        if (uint8(c) >= uint8(bytes1("a")) && uint8(c) <= uint8(bytes1("f"))) {
+            return 10 + uint8(c) - uint8(bytes1("a"));
+        }
+        if (uint8(c) >= uint8(bytes1("A")) && uint8(c) <= uint8(bytes1("F"))) {
+            return 10 + uint8(c) - uint8(bytes1("A"));
+        }
+        revert("Invalid hex character");
+    }
+
+    function generate_vrf_proof(bytes32 alpha)
+        public
+        returns (
+            uint256[2] memory pk,
+            uint256[4] memory proof,
+            uint256[2] memory U,
+            uint256[4] memory V,
+            bytes32 beta,
+            bytes memory encoded_proof,
+            bytes memory encoded_pk
+        )
+    {
+        console.log("Length of message (alpha):", alpha.length);
+        // alpha = zero_pad_b32(alpha);
+        // string memory encoded_alpha = bytes_to_hex_string(alpha);
+        // assertEq(encoded_alpha, Strings.toHexStringNoPrefix(alpha));
+        // string memory encoded_alpha = Strings.toHexStringNoPrefix(alpha);
+        string memory encoded_alpha = Strings.toHexString(uint256(alpha), 32);
+
+        console.log("alpha:");
+        console.logBytes32(alpha);
+
+        console.log("Revised length of message (alpha):", alpha.length);
+        string[] memory inputs = new string[](6);
+        inputs[0] = "test/utils/gen_vrf/target/debug/gen_vrf";
+        inputs[1] = "-o";
+        inputs[2] = "prove";
+        inputs[3] = "-m";
+        inputs[4] = encoded_alpha;
+        inputs[5] = "--silent";
+        // inputs[6] = "--soft";
+        console.log("Encoded alpha:", encoded_alpha);
+
+        bytes memory res = vm.ffi(inputs);
+        console.log("res:", string(res));
+        assertEq(string(res), "Ok");
+        VrfData memory vrf_data = load_vrf_proof(false);
+        // VrfData memory vrf_data = parse_vrf_json(string(res));
+        assertEq(bytes32(vrf_data.message), alpha);
+
+        pk = VRF.decodePoint(vrf_data.public_key);
+        proof = VRF.decodeProof(vrf_data.proof);
+        encoded_proof = vrf_data.proof;
+        encoded_pk = vrf_data.public_key;
+
+        assertTrue(VRF.verify(pk, proof, bytes.concat(alpha)));
+
+        (U, V) = VRF.computeFastVerifyParams(pk, proof, bytes.concat(alpha));
+        beta = VRF.gammaToHash(proof[0], proof[1]);
+    }
+
+    function get_valid_vrf_proof()
+        public
+        pure
+        returns (
+            uint256[2] memory pk,
+            bytes memory alpha,
+            uint256[2] memory U,
+            uint256[4] memory V,
+            bytes memory pi,
+            bytes32 beta,
+            uint256[4] memory proof,
+            bytes memory pub_bytes
+        )
+    {
+        return get_valid_static_vrf_proof();
+    }
+
+    function get_pk() public returns (uint256[2] memory) {
+        generate_vrf_proof(bytes32(hex"1337"));
+        VrfData memory vrf_data = load_vrf_proof(true);
+        return VRF.decodePoint(vrf_data.public_key);
+    }
+
+    function parse_vrf_json(string memory json) internal pure returns (VrfData memory vrf_data) {
+        bytes memory data = vm.parseJson(json);
+        VrfDatai memory vrf_data_intermediate = abi.decode(data, (VrfDatai));
+        vrf_data.hash = vrf_data_intermediate.hash;
+        vrf_data.message = uint256(vrf_data_intermediate.message);
+        console.log("Message:", vrf_data.message);
+        vrf_data.proof = vrf_data_intermediate.proof;
+        vrf_data.public_key = vrf_data_intermediate.public_key;
+        vrf_data.secret_key = vrf_data_intermediate.secret_key;
+    }
+
+    function load_vrf_proof(bool dummy) public returns (VrfData memory vrf_data) {
+        string memory ROOT = vm.projectRoot();
+        string memory PATH = string.concat(ROOT, "/vrf_proof.json");
+        // vm.sleep(1000);
+        string memory json = vm.readFile(PATH);
+        console.log("Raw Data:", json);
+        vrf_data = parse_vrf_json(json);
+        if (dummy) {
+            // console.log("Length of message:", vrf_data.message.length);
+            assertEq(vrf_data.message, uint256(bytes32(hex"1337")));
+            uint256[2] memory _pk = VRF.decodePoint(vrf_data.public_key);
+            uint256[4] memory _proof = VRF.decodeProof(vrf_data.proof);
+            assertTrue(VRF.verify(_pk, _proof, bytes.concat(bytes32(vrf_data.message))));
+        }
     }
 }
 

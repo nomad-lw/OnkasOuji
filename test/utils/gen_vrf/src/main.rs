@@ -1,34 +1,231 @@
+use clap::Parser;
+use dotenv::dotenv;
 use hex;
+use rand::random;
+use serde_json::json;
+use std::env;
+use std::error::Error;
+use std::fmt;
+use std::fs::File;
+use std::io::ErrorKind;
+use std::io::Write;
+use vrf::openssl::Error as OpenSSLError;
 use vrf::openssl::{CipherSuite, ECVRF};
 use vrf::VRF;
 
+const SECRET_KEY_ENV: &str = "VRF_SECRET_KEY";
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Operation to perform: "prove" or "verify"
+    #[arg(short, long)]
+    operation: String,
 
-fn main() {
+    /// Message to use for the operation (hex-string)
+    #[arg(short, long)]
+    message: String,
+
+    /// proof (pi) value to use for the operation (hex-string) (only if operation is "verify")
+    #[arg(short, long)]
+    pi: Option<String>,
+
+    /// Force generation of a new secret key
+    #[arg(short, long)]
+    force_key_gen: bool,
+
+    /// Silent mode
+    #[arg(short, long)]
+    silent: bool,
+
+    /// Soft mode
+    #[arg(long)]
+    soft: bool,
+}
+
+#[derive(Debug)]
+struct VrfError {
+    inner: OpenSSLError,
+}
+
+impl fmt::Display for VrfError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "VRF error: {}", self.inner)
+    }
+}
+
+impl Error for VrfError {}
+
+impl From<OpenSSLError> for VrfError {
+    fn from(error: OpenSSLError) -> Self {
+        VrfError { inner: error }
+    }
+}
+
+fn generate_secret_key() -> [u8; 32] {
+    println!("Generating a new secret key...");
+    let key: [u8; 32] = random();
+    println!("Secret key generated: {}", hex::encode(&key));
+    // Save the key to .env file
+    let env_file_content = format!("{}={}\n", SECRET_KEY_ENV, hex::encode(&key));
+    let mut env_file = match File::options().append(true).open(".env") {
+        Ok(file) => file,
+        Err(_) => File::create(".env").expect("Unable to create .env file"),
+    };
+    env_file
+        .write_all(env_file_content.as_bytes())
+        .expect("Unable to write to .env file");
+    key
+}
+
+fn get_secret_key(force: bool, silent: bool) -> [u8; 32] {
+    // let force = force.unwrap_or(false);
+    if force {
+        generate_secret_key()
+    } else if let Ok(secret_key) = env::var(SECRET_KEY_ENV) {
+        if !silent {
+            println!("Using existing secret key: {}", secret_key);
+            println!("Decoding secret key...");
+        }
+        hex::decode(secret_key)
+            .expect("Invalid secret key format")
+            .try_into()
+            .expect("Secret key must be 32 bytes")
+    } else {
+        generate_secret_key()
+    }
+}
+
+fn generate_vrf_proof(
+    message: &[u8],
+    force_key_gen: bool,
+    silent: bool,
+    soft: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Initialization of VRF context by providing a curve
     let mut vrf = ECVRF::from_suite(CipherSuite::SECP256K1_SHA256_TAI).unwrap();
-    // Inputs: Secret Key, Public Key (derived) & Message
-    let pre_pi = hex::decode("031f4dbca087a1972d04a07a779b7df1caa99e0f5db2aa21f3aecc4f9e10e85d0814faa89697b482daa377fb6b4a8b0191a65d34a6d90a8a2461e5db9205d4cf0bb4b2c31b5ef6997a585a9f1a72517b6f").unwrap();
-    let p2hash = vrf.proof_to_hash(&pre_pi).unwrap();
-    println!("Proof to Hash: {}", hex::encode(p2hash));
-    // let secret_key =
-    //     hex::decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721").unwrap();
-    // let public_key = vrf.derive_public_key(&secret_key).unwrap();
-    let public_key = &hex::decode("032c8c31fc9f990c6b55e3865a184a4ce50e09481f2eaeb3e60ec1cea13a6ae645").unwrap();
-    let message: &[u8] = &hex::decode("73616d706c65").unwrap();
-    println!("Message as hex: {}", hex::encode(message));
-    if message.len() <= 32 {
-        let mut uint256 = [0u8; 32];
-        uint256[32 - message.len()..].copy_from_slice(message);
-        println!("Message as uint256: {}", hex::encode(uint256));
+
+    // Generate a new secret key
+    let secret_key = get_secret_key(force_key_gen, silent);
+    // Derive the public key from the secret key
+    let public_key = vrf.derive_public_key(&secret_key).unwrap();
+
+    // Create a VRF proof of the message
+    let pi = vrf.prove(&secret_key, &message).unwrap();
+
+    // Convert the proof to a hash
+    let hash = vrf.proof_to_hash(&pi).unwrap();
+
+    // Create a JSON object with the secret key, public key, message, proof, and hash
+    let json_data = json!({
+        "secret_key": format!("0x{}", hex::encode(&secret_key)),
+        "public_key": format!("0x{}", hex::encode(&public_key)),
+        "message": format!("0x{}", hex::encode(&message)),
+        "proof": format!("0x{}", hex::encode(&pi)),
+        "hash": format!("0x{}", hex::encode(&hash)),
+    });
+
+    if soft {
+        print!("{}", json_data.to_string());
     } else {
-        println!("Message exceeds uint256 size");
+        // Write the JSON object to a file
+        let mut file = File::create("vrf_proof.json")?;
+        file.write_all(json_data.to_string().as_bytes())?;
     }
-    // // VRF proof and hash output
+
+    Ok(())
+}
+
+fn verify_vrf_proof(
+    message: &[u8],
+    pi: &[u8],
+    force_key_gen: bool,
+    silent: bool,
+) -> Result<(), Box<dyn Error>> {
+    let mut vrf = ECVRF::from_suite(CipherSuite::SECP256K1_SHA256_TAI).unwrap();
+    let secret_key = get_secret_key(force_key_gen, silent);
+    let public_key = vrf.derive_public_key(&secret_key).unwrap();
     // let pi = vrf.prove(&secret_key, &message).unwrap();
     // let hash = vrf.proof_to_hash(&pi).unwrap();
+    match vrf.verify(&public_key, &pi, &message) {
+        Ok(_) => {
+            if !silent {
+                println!("Proof is valid");
+            }
+        }
+        Err(e) => {
+            if !silent {
+                eprintln!("Proof was invalid: {}", e);
+            }
+            return Err(Box::new(VrfError::from(e)));
+        }
+    }
 
-    // // VRF proof verification (returns VRF hash output)
-    let beta = vrf.verify(&public_key, &pre_pi, &message).unwrap();
-    println!("Verification Result: {}", hex::encode(beta));
+    Ok(())
+}
+
+fn decode_hex_string(hex_str: &str) -> Result<Vec<u8>, hex::FromHexError> {
+    if hex_str.starts_with("0x") {
+        hex::decode(&hex_str[2..])
+    } else {
+        hex::decode(hex_str)
+    }
+}
+
+fn main() {
+    dotenv().ok();
+    let args = Args::parse();
+
+    let message = decode_hex_string(&args.message).expect("Invalid message format");
+    if !args.silent {
+        println!("Number of bytes in message: {}", message.len());
+    }
+    // Generate the VRF proof and export to JSON file
+    match args.operation.as_str() {
+        "prove" => {
+            if let Err(e) = generate_vrf_proof(&message, args.force_key_gen, args.silent, args.soft) {
+                if !args.silent {
+                    eprintln!("Error generating VRF proof: {}", e);
+                } else {
+                    print!("Error");
+                }
+                std::process::exit(1);
+            }
+            if !args.silent {
+                println!("VRF proof generated and exported to vrf_proof.json");
+            } else {
+                if args.soft {
+                    // No operation if soft is true
+                } else {
+                    print!("Ok");
+                }
+            }
+        }
+        "verify" => {
+            let pi: Vec<u8> = match args.pi {
+                Some(ref pi_str) => decode_hex_string(pi_str).expect("Invalid proof format"),
+                None => {
+                    eprintln!("Proof (pi) is required for the 'verify' operation");
+                    std::process::exit(1);
+                }
+            };
+            if let Err(e) = verify_vrf_proof(&message, &pi, args.force_key_gen, args.silent) {
+                if !args.silent {
+                    eprintln!("Error verifying VRF proof: {}", e);
+                } else {
+                    print!("Error");
+                }
+                std::process::exit(1);
+            }
+            if !args.silent {
+                println!("VRF proof verified successfully");
+            } else {
+                print!("Ok");
+            }
+        }
+        _ => {
+            eprintln!("Unsupported operation: {}", args.operation);
+            std::process::exit(1);
+        }
+    }
 }

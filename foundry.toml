@@ -2,7 +2,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-fs_permissions = [{ access = "read-write", path = "./out"}]
+fs_permissions = [{ access = "read-write", path = "./out"},{ access = "read", path = "./vrf_proof.json"}]
 remappings = [
     "@pythnetwork/entropy-sdk-solidity/=node_modules/@pythnetwork/entropy-sdk-solidity",
     # "@solady/=lib/solady/src",
@@ -17,7 +17,7 @@ optimizer_runs = 200
 sparse_mode = true
 # details = { yul = true, }
 # yul = true
-
+ffi = true
 # testing
 verbosity = 3
 # match-path = "ARB/test/unit/"

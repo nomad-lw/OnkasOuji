@@ -25,6 +25,10 @@ contract MockPythEntropy is IEntropy {
         return requests[provider][sequence_number];
     }
 
+    function getLatestSequenceNumber(address provider) external view returns (uint64 idx) {
+        idx = _providerSequenceNumbers[provider];
+    }
+
     function requestWithCallback(address provider, bytes32 user_random_number) external payable returns (uint64) {
         require(msg.value >= MOCK_FEE, "Insufficient fee");
         require(provider == ADDR_PYTH_PROVIDER, "Invalid provider");

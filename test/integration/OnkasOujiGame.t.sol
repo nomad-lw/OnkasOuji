@@ -3,30 +3,33 @@ pragma solidity ^0.8.28;
 
 import {Test, console} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-// import {makeAddr} from "forge-std/StdCheats.sol";
+import {Wyrd} from "src/Wyrd.sol";
 import {OnkasOujiGame} from "src/OnkasOujiGame.sol";
-import {GameData, GameStatus, Player, Speculation, RoundResult} from "src/lib/models.sol";
+import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from "src/lib/models.sol";
 
 import {VRFTestData} from "test/utils/VRFTestData.sol";
 import "test/config.sol" as cfg;
+import {OnkasOujiGameTestHelpers, TestableOnkasOujiGame} from "test/integration/Helpers.t.sol";
 
 import {MockPythEntropy, MockRandomizer} from "test/mocks/MockRandomProviders.t.sol";
 import {TestNFT} from "test/mocks/MockERC721.t.sol";
 import {TestERC20} from "test/mocks/MockERC20.t.sol";
+import {WyrdTests} from "test/integration/Wyrd.t.sol";
 
 struct Balance {
     address addr;
     uint256 val;
 }
 
-contract OnkasOujiGameIntegrationTest is Test {
+contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
     // Constants
     uint256 private constant GAME_AMOUNT = 100 * 10 ** 18;
     uint256 private constant BET_AMOUNT = 10 * 10 ** 18;
     uint256 ROLE_OPERATOR = 1 << 0;
+    uint256 ROLE_SAV_PROVER = 1 << 1;
 
     // Contract instances
-    OnkasOujiGame private game;
+    TestableOnkasOujiGame private game;
     TestNFT private nft;
     TestERC20 private token;
     MockPythEntropy private pyth_entropy;
@@ -70,24 +73,14 @@ contract OnkasOujiGameIntegrationTest is Test {
 
         pyth_entropy = new MockPythEntropy();
         randomizer = new MockRandomizer();
+        mock_pyth_entropy = pyth_entropy;
+        mock_randomizer = randomizer;
 
+        // Tokens: $GOLD & $ONKA
+        //
         vm.startPrank(cfg.ADDR_DEPLOYER);
-
         nft = new TestNFT(); // address(this) should recieve 90B
         token = new TestERC20();
-
-        // deploy game contract
-        game = new OnkasOujiGame(
-            address(nft),
-            address(token),
-            address(pyth_entropy),
-            cfg.ADDR_PYTH_PROVIDER,
-            address(randomizer),
-            [cfg.SAV_PROVER_PK_X, cfg.SAV_PROVER_PK_Y],
-            cfg.ADDR_MARKETING
-        );
-        // post-deployment setup
-        game.grantRoles(address(cfg.ADDR_OPERATOR), ROLE_OPERATOR);
 
         // Mint NFTs
         onka_p1 = nft.mint(cfg.ADDR_PLAYER_1);
@@ -104,97 +97,20 @@ contract OnkasOujiGameIntegrationTest is Test {
         token.mint(cfg.ADDR_BETOOR_2, 1000 ether);
         token.mint(cfg.ADDR_BETOOR_3, 1000 ether);
 
+        // Deploy: Game
+        //
+        uint256[2] memory sav_pk = [uint256(0x1), uint256(0x2)];
+        game = new TestableOnkasOujiGame(
+            address(nft), address(token), address(pyth_entropy), cfg.ADDR_PYTH_PROVIDER, address(randomizer), sav_pk, cfg.ADDR_MARKETING
+        );
+        wyrd = game;
+        twyrd = game;
+        sav_pk = twyrd.vrf_tester().get_pk();
         vm.stopPrank();
-    }
-
-    // Test registeration and game creation
-    function test_register_and_create_game() public {
-        // Test user registration
-
-        // Register player 1
-        vm.startPrank(cfg.ADDR_PLAYER_1);
-        vm.deal(cfg.ADDR_PLAYER_1, 0.1 ether);
-        token.approve(address(game), type(uint256).max);
-        bytes32 secret1 = bytes32("secret_PLAYER_1");
-        vm.expectEmit(true, true, false, true, address(game));
-        emit OnkasOujiGame.UserRegistered(secret1, cfg.ADDR_PLAYER_1);
-        game.register(secret1);
-        vm.stopPrank();
-
-        // Register player 2
-        vm.startPrank(cfg.ADDR_PLAYER_2);
-        vm.deal(cfg.ADDR_PLAYER_2, 0.1 ether);
-        token.approve(address(game), type(uint256).max);
-        bytes32 secret2 = bytes32("secret_PLAYER_2");
-        vm.expectEmit(true, true, false, true, address(game));
-        emit OnkasOujiGame.UserRegistered(secret2, cfg.ADDR_PLAYER_2);
-        game.register(secret2);
-        vm.stopPrank();
-
-        // Player 3: failed registration
-        vm.startPrank(cfg.ADDR_PLAYER_3);
-        vm.deal(cfg.ADDR_PLAYER_3, 0.1 ether);
-        token.approve(address(game), type(uint256).max - 1);
-        vm.expectRevert();
-        game.register(bytes32("secret_PLAYER_3"));
-        vm.stopPrank();
-
-        // Player 4: unregistered
-        // Approve but don't register player 4
-        vm.startPrank(cfg.ADDR_PLAYER_4);
-        vm.deal(cfg.ADDR_PLAYER_4, 0.1 ether);
-        token.approve(address(game), 5);
-        // game.register(bytes32("secret_PLAYER_4"));
-        vm.stopPrank();
-
-        // Test new game creation - create a game between player1 and player2 with 10 ether stake
-        // This will check event emission, token transfers, and game state initialization
-        // Record initial balances
-        uint256 player1_balance_before = token.balanceOf(cfg.ADDR_PLAYER_1);
-        uint256 player2_balance_before = token.balanceOf(cfg.ADDR_PLAYER_2);
-
-        vm.startPrank(cfg.ADDR_OPERATOR);
-        // Expect GameCreated event
-        vm.expectEmit(true, true, false, true, address(game));
-        emit OnkasOujiGame.GameCreated(1, [Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether);
-
-        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, bytes32(uint256(0x1337)));
-        vm.stopPrank();
-
-        // Verify player balances reduced by 10 ether
-        assertEq(token.balanceOf(cfg.ADDR_PLAYER_1), player1_balance_before - 10 ether, "Player 1 balance not reduced correctly");
-        assertEq(token.balanceOf(cfg.ADDR_PLAYER_2), player2_balance_before - 10 ether, "Player 2 balance not reduced correctly");
-
-        // Test game creation failure scenarios
-
-        // 1. Test with non-registered user (Player 4 isn't registered, but as long as sufficient approval exists, game creation should succeed)
-        vm.startPrank(cfg.ADDR_OPERATOR);
-        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_4, onka_p4)], 5, bytes32(uint256(0x1338)));
-        vm.stopPrank();
-
-        // 2. Test with registered user with insufficient balance
-        // Drain player2's account leaving only 5 ether
-        vm.startPrank(cfg.ADDR_PLAYER_2);
-        console.log("Player2 balance before drain:", token.balanceOf(cfg.ADDR_PLAYER_2), "New balance will be:", 5 ether);
-        token.transfer(address(0x1), token.balanceOf(cfg.ADDR_PLAYER_2) - 5 ether);
-        vm.stopPrank();
-
-        vm.startPrank(cfg.ADDR_OPERATOR);
-        vm.expectRevert();
-        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, bytes32(uint256(0x1339)));
-        vm.stopPrank();
-
-        // 3. Test with user that doesn't own the specified NFT
-        vm.startPrank(cfg.ADDR_OPERATOR);
-        vm.expectRevert(abi.encodeWithSelector(OnkasOujiGame.InvalidNFTOwnership.selector, cfg.ADDR_PLAYER_1, onka_p2));
-        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p2), Player(cfg.ADDR_PLAYER_2, onka_p1)], 10 ether, bytes32(uint256(0x1340)));
-        vm.stopPrank();
-
-        // 4. Test with non-operator address calling
-        vm.startPrank(address(0xCAFE));
-        vm.expectRevert();
-        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, bytes32(uint256(0x1341)));
-        vm.stopPrank();
+        // post-deployment setup
+        grant_roles(address(game), cfg.ADDR_OPERATOR, ROLE_OPERATOR);
+        grant_roles(address(game), cfg.ADDR_SAV_PROVER, ROLE_SAV_PROVER);
+        sav_update_public_key();
     }
 
     // Test full game flow - from creation to completion
@@ -278,6 +194,17 @@ contract OnkasOujiGameIntegrationTest is Test {
             vm.stopPrank();
         }
     }
+
+    function register_user(address player, bytes32 secret) internal {
+        vm.startPrank(player);
+        vm.deal(player, 0.1 ether);
+        token.approve(address(game), type(uint256).max);
+        vm.expectEmit(true, true, false, true, address(game));
+        emit OnkasOujiGame.UserRegistered(secret, player);
+        game.register(secret);
+        vm.stopPrank();
+    }
+
     /**
      * @notice Sets up a complete game with players and bets
      * @param players Two Player structs for the game participants
@@ -289,7 +216,6 @@ contract OnkasOujiGameIntegrationTest is Test {
      * Checks: registrations, balances before/after game creation
      * and betting, game data validity, active games list inclusion
      */
-
     function setup_game(Player[2] memory players, uint256 amount, Speculation[] memory speculations, bool register)
         public
         returns (uint256 game_id)
@@ -370,10 +296,14 @@ contract OnkasOujiGameIntegrationTest is Test {
     }
 
     function create_game(Player[2] memory players, uint256 amount, uint256 expected_id) internal returns (uint256) {
+        return create_game(players, amount, expected_id, bytes32(uint256(0x1337)));
+    }
+
+    function create_game(Player[2] memory players, uint256 amount, uint256 expected_id, bytes32 alpha_prefix) internal returns (uint256) {
         vm.startPrank(cfg.ADDR_OPERATOR);
         vm.expectEmit(true, true, false, true, address(game));
         emit OnkasOujiGame.GameCreated(expected_id, players, amount);
-        uint256 game_id = game.new_game(players, amount, bytes32(uint256(0x1337)));
+        uint256 game_id = game.new_game(players, amount, alpha_prefix);
         vm.stopPrank();
         return game_id;
     }
@@ -390,6 +320,17 @@ contract OnkasOujiGameIntegrationTest is Test {
         assertEq(uint8(game_data.status), uint8(expected_status), string.concat("Game status should be ", string(abi.encode(expected_status))));
     }
 
+    function set_user_token_balance(address user, uint256 new_balance) internal {
+        vm.startPrank(user);
+        uint256 current_balance = token.balanceOf(user);
+        if (new_balance < current_balance) {
+            token.transfer(address(0x1), current_balance - new_balance);
+        } else if (new_balance > current_balance) {
+            token.mint(user, new_balance - current_balance);
+        }
+        vm.stopPrank();
+    }
+
     function abort_game(uint256 game_id) internal {
         vm.expectEmit(true, false, false, false, address(game));
         emit OnkasOujiGame.GameAborted(game_id);
@@ -397,19 +338,55 @@ contract OnkasOujiGameIntegrationTest is Test {
         game.abort_game(game_id);
 
         // verify game status is now CANCELLED
+        verify_game_status(game_id, GameStatus.CANCELLED);
+    }
+
+    function exec_game(uint256 game_id) internal {
         GameData memory game_data = game.get_game(game_id);
-        assertEq(uint8(game_data.status), uint8(GameStatus.CANCELLED), "Game should be in CANCELLED status");
+        OnkaStats memory o1_stats_before = game.get_onka_stats(game_data.players[0].nft_id);
+        OnkaStats memory o2_stats_before = game.get_onka_stats(game_data.players[1].nft_id);
+
+        verify_game_status(game_id, GameStatus.ACTIVE);
+
+        vm.expectEmit(true, false, false, false, address(game));
+        emit OnkasOujiGame.GameExecuted(game_id);
+        vm.prank(cfg.ADDR_OPERATOR);
+        game.exec_game(game_id);
+
+        game_data = game.get_game(game_id);
+        verify_game_status(game_id, GameStatus.UNSETTLED);
+
+        // verify onka stats are updated
+        OnkaStats memory o1_stats_after = game.get_onka_stats(game_data.players[0].nft_id);
+        OnkaStats memory o2_stats_after = game.get_onka_stats(game_data.players[1].nft_id);
+
+        assertEq(o1_stats_after.plays, o1_stats_before.plays + 1, "Onka 1 NFT plays should be incremented by 1");
+        assertEq(o2_stats_after.plays, o2_stats_before.plays + 1, "Onka 2 NFT plays should be incremented by 1");
+
+        if (game_data.p1_wins > game_data.p2_wins) {
+            assertEq(o1_stats_after.wins, o1_stats_before.wins + 1, "Onka 1 NFT wins should be incremented by 1");
+            assertEq(o2_stats_after.losses, o2_stats_before.losses + 1, "Onka 2 NFT losses should be incremented by 1");
+        } else {
+            assertEq(o2_stats_after.wins, o2_stats_before.wins + 1, "Onka 2 NFT wins should be incremented by 1");
+            assertEq(o1_stats_after.losses, o1_stats_before.losses + 1, "Onka 1 NFT losses should be incremented by 1");
+        }
     }
 
     function create_game_and_verify_balances(Player[2] memory players, uint256 amount, uint256 expected_id) internal returns (uint256) {
+        return create_game_and_verify_balances(players, amount, expected_id, bytes32(uint256(0x1337)));
+    }
+
+    function create_game_and_verify_balances(Player[2] memory players, uint256 amount, uint256 expected_id, bytes32 alpha_prefix)
+        internal
+        returns (uint256)
+    {
         Balance[] memory expected_bals = new Balance[](3);
         expected_bals[0] = Balance(players[0].addr, token.balanceOf(players[0].addr) - amount);
         expected_bals[1] = Balance(players[1].addr, token.balanceOf(players[1].addr) - amount);
         expected_bals[2] = Balance(address(game), token.balanceOf(address(game)) + amount * 2);
-        uint256 game_id = create_game(players, amount, expected_id);
-        verify_balances(expected_bals);
 
-        // Verify game status
+        uint256 game_id = create_game(players, amount, expected_id, alpha_prefix);
+        verify_balances(expected_bals);
         verify_game_status(game_id, GameStatus.OPEN);
 
         return game_id;
@@ -420,7 +397,7 @@ contract OnkasOujiGameIntegrationTest is Test {
         uint256 contract_balance_before = token.balanceOf(address(game));
         Balance[] memory balances = new Balance[](2);
 
-        vm.expectEmit(true, false, false, false, address(game));
+        vm.expectEmit(true, true, true, true, address(game));
         emit OnkasOujiGame.BetPlaced(game_id, bettor, prediction, amount);
         vm.prank(cfg.ADDR_OPERATOR);
         game.place_bet(game_id, bettor, prediction, amount);
@@ -442,6 +419,23 @@ contract OnkasOujiGameIntegrationTest is Test {
 
         verify_game_status(game_id, GameStatus.OPEN);
         (uint256 request_fee,,) = game.calc_fee();
+
+        // Check for RandomnessRequested events for each activated provider
+        uint8 active_sources = game.get_active_sources();
+        console.log("Active sources:", active_sources);
+        if (active_sources & cfg.FLAG_PYTH != 0) {
+            vm.expectEmit(true, true, true, true, address(game));
+            emit Wyrd.RandomnessRequested(game_id, cfg.FLAG_PYTH);
+        }
+        if (active_sources & cfg.FLAG_RANDOMIZER != 0) {
+            vm.expectEmit(true, true, true, true, address(game));
+            emit Wyrd.RandomnessRequested(game_id, cfg.FLAG_RANDOMIZER);
+        }
+        if (active_sources & cfg.FLAG_SAV != 0) {
+            vm.expectEmit(true, true, true, true, address(game));
+            emit Wyrd.RandomnessRequested(game_id, cfg.FLAG_SAV);
+        }
+
         vm.prank(cfg.ADDR_OPERATOR);
         vm.expectEmit(true, false, false, false, address(game));
         emit OnkasOujiGame.GameStarted(game_id);
@@ -465,6 +459,61 @@ contract OnkasOujiGameIntegrationTest is Test {
         assertFalse(game_still_active, "Game should be removed from active games list");
     }
 
+    // Test user registration and game creation
+    function test_register_and_create_game() public {
+        // Register player 1
+        register_user(cfg.ADDR_PLAYER_1, bytes32("secret_PLAYER_1"));
+
+        // Register player 2
+        register_user(cfg.ADDR_PLAYER_2, bytes32("secret_PLAYER_2"));
+
+        // Player 3: failed registration
+        vm.startPrank(cfg.ADDR_PLAYER_3);
+        vm.deal(cfg.ADDR_PLAYER_3, 0.1 ether);
+        token.approve(address(game), type(uint256).max - 1);
+        vm.expectRevert();
+        game.register(bytes32("secret_PLAYER_3"));
+        vm.stopPrank();
+
+        // Player 4: unregistered (Approve but don't register player 4)
+        vm.startPrank(cfg.ADDR_PLAYER_4);
+        vm.deal(cfg.ADDR_PLAYER_4, 0.1 ether);
+        token.approve(address(game), 5);
+        // game.register(bytes32("secret_PLAYER_4"));
+        vm.stopPrank();
+
+        // Test new game creation - create a game between player1 and player2 with 10 ether stake
+        // This will check event emission, token transfers, and game state initialization
+
+        create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, 1);
+
+        // 1. Test with non-registered user (Player 4 isn't registered, but as long as sufficient approval exists, game creation should succeed)
+        create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_4, onka_p4)], 5, 2, bytes32(uint256(0x1338)));
+
+        // Test game creation failure scenarios
+
+        // 2. Test with registered user with insufficient balance
+        // Drain player2's account leaving only 5 ether
+        set_user_token_balance(cfg.ADDR_PLAYER_2, 5 ether);
+
+        vm.startPrank(cfg.ADDR_OPERATOR);
+        vm.expectRevert();
+        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, bytes32(uint256(0x1339)));
+        vm.stopPrank();
+
+        // 3. Test with user that doesn't own the specified NFT
+        vm.startPrank(cfg.ADDR_OPERATOR);
+        vm.expectRevert(abi.encodeWithSelector(OnkasOujiGame.InvalidNFTOwnership.selector, cfg.ADDR_PLAYER_1, onka_p2));
+        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p2), Player(cfg.ADDR_PLAYER_2, onka_p1)], 10 ether, bytes32(uint256(0x1340)));
+        vm.stopPrank();
+
+        // 4. Test with non-operator address calls
+        vm.startPrank(address(0xCAFE));
+        vm.expectRevert();
+        game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, bytes32(uint256(0x1341)));
+        vm.stopPrank();
+    }
+
     // Test game abortion
     function test_abort_game() public {
         uint256 amount = 10 ether;
@@ -478,7 +527,6 @@ contract OnkasOujiGameIntegrationTest is Test {
         register_users(users);
 
         // vars
-
         uint256 game_id;
         GameData memory game_data;
         Balance[] memory expected_bals = new Balance[](3);
@@ -512,29 +560,29 @@ contract OnkasOujiGameIntegrationTest is Test {
 
         // In-Progress Abort: start a game and abort after it starts
         //
+        for (uint8 i = 0; i < 2; i++) {
+            game_id = create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], amount, game_id + 1);
+            if (i == 1) place_bet_and_verify_balances(game_id, cfg.ADDR_BETOOR_1, true, bet);
+            start_game_and_verify_balances(game_id);
+            // abort
+            abort_game(game_id);
+            verify_balances(expected_bals);
+            verify_game_not_active(game_id);
+        }
+
+        // Post-exec abort: Test aborting a game that's in progress and has computed results
+        //
         game_id = create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], amount, game_id + 1);
         start_game_and_verify_balances(game_id);
+        // process cbs
+        ext_process_request_callbacks(game_id);
+        // exec
+        exec_game(game_id);
         // abort
         abort_game(game_id);
         verify_balances(expected_bals);
         verify_game_not_active(game_id);
 
-        // // Test aborting a game that's already in progress
-        // // Create another game and start it
-        // vm.startPrank(cfg.ADDR_OPERATOR);
-        // uint256 game_id2 = game.new_game([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, bytes32(uint256(0x1338)));
-
-        // // Start the game (transition to ACTIVE state)
-        // (uint256 request_fee,,) = game.calc_fee();
-        // game.start_game{value: request_fee}(game_id2);
-
-        // // Abort the game in ACTIVE state
-        // game.abort_game(game_id2);
-        // vm.stopPrank();
-
-        // // Verify refunds for game in ACTIVE state too
-        // assertEq(token.balanceOf(cfg.ADDR_PLAYER_1), player1_initial_balance, "Player 1 should get full refund after aborting ACTIVE game");
-        // assertEq(token.balanceOf(cfg.ADDR_PLAYER_2), player2_initial_balance, "Player 2 should get full refund after aborting ACTIVE game");
     }
 
     // Test betting mechanics and odds calculation

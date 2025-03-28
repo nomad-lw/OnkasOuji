@@ -109,8 +109,8 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     bool public sav_enabled;
     uint256[2] public SAV_PUB_KEY; // would like this to be a constant. Can't
     uint256 public sav_last_key_update_timestamp;
-    mapping(uint64 => uint256) internal pyth_cbidx_req;
-    mapping(uint256 => uint256) internal randomizer_cbidx_req;
+    mapping(uint64 => uint256) internal _pyth_cbidx_req;
+    mapping(uint256 => uint256) internal _randomizer_cbidx_req;
     mapping(uint256 => uint8) internal req_executions;
     mapping(uint256 => bytes32) internal req_rand;
     mapping(uint256 => bytes32) internal req_alpha; // inheriting contract can override usefulness
@@ -254,7 +254,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
      */
     function entropyCallback(uint64 sequence_number, address, bytes32 _beta) internal override {
         // Handle the entropy callback, caller check handled by _entropyCallback
-        uint256 req_id = pyth_cbidx_req[sequence_number];
+        uint256 req_id = _pyth_cbidx_req[sequence_number];
         process_callback(req_id, uint256(sequence_number), FLAG_PYTH, _beta);
     }
 
@@ -282,9 +282,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
     function randomizerCallback(uint256 _id, bytes32 _beta) external {
         //Callback can only be called by randomizer
         if (msg.sender != address(RANDOMIZER)) revert UnauthorizedCaller();
-
-        uint256 req_id = randomizer_cbidx_req[_id];
-
+        uint256 req_id = _randomizer_cbidx_req[_id];
         process_callback(req_id, _id, FLAG_RANDOMIZER, _beta);
     }
 
@@ -381,7 +379,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
         if (pyth_enabled) {
             req_executions[req_id] |= FLAG_PYTH;
             uint64 idx = PYTH_ENTROPY.requestWithCallback{value: pyth_fee}(PYTH_PROVIDER, alpha);
-            pyth_cbidx_req[idx] = req_id;
+            _pyth_cbidx_req[idx] = req_id;
             available_fee -= pyth_fee;
             emit RandomnessRequested(req_id, FLAG_PYTH);
         }
@@ -390,7 +388,7 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
             req_executions[req_id] |= FLAG_RANDOMIZER;
             if (randomizer_fee > 0) randomizer_deposit(available_fee); // allow deposit buffer through overallocation
             uint256 idx = RANDOMIZER.request(CALLBACK_GAS_LIMIT);
-            randomizer_cbidx_req[idx] = req_id;
+            _randomizer_cbidx_req[idx] = req_id;
             emit RandomnessRequested(req_id, FLAG_RANDOMIZER);
         }
 
