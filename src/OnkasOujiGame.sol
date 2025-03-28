@@ -167,6 +167,10 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         return _onka_stats[nft_id];
     }
 
+    function get_revenue_bps() external view returns (uint256) {
+        return _bps_revenue;
+    }
+
     function compute_alpha(uint256 game_id) public view returns (bytes32) {
         if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
         return compute_alpha(game_id, _games[game_id]);

@@ -12,6 +12,10 @@ import {MockPythEntropy, MockRandomizer} from "test/mocks/MockRandomProviders.t.
 import {IEntropy} from "@pythnetwork/entropy-sdk-solidity/IEntropy.sol";
 import {IRandomizer} from "src/interfaces/ext/IRandomizer.sol";
 import {IWyrd} from "src/interfaces/IWyrd.sol";
+import {MockPythEntropy, MockRandomizer} from "test/mocks/MockRandomProviders.t.sol";
+import {TestNFT} from "test/mocks/MockERC721.t.sol";
+import {TestERC20} from "test/mocks/MockERC20.t.sol";
+import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from "src/lib/models.sol";
 
 interface ITestableWyrd is IWyrd {
     function vrf_tester() external returns (VRFTestData);
@@ -286,7 +290,7 @@ abstract contract WyrdTestHelpers is Test {
     }
 
     function sav_update_public_key() public {
-        uint[2] memory pk = twyrd.vrf_tester().get_pk();
+        uint256[2] memory pk = twyrd.vrf_tester().get_pk();
         vm.warp(block.timestamp + 5 hours);
         vm.prank(cfg.ADDR_SAV_PROVER);
         wyrd.set_sav_public_key(pk);
@@ -340,4 +344,380 @@ abstract contract WyrdTestHelpers is Test {
     }
 }
 
-abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {}
+abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
+    struct Balance {
+        address addr;
+        uint256 val;
+    }
+
+    // Constants
+    uint256 internal constant GAME_AMOUNT = 100 * 10 ** 18;
+    uint256 internal constant BET_AMOUNT = 10 * 10 ** 18;
+    uint256 ROLE_OPERATOR = 1 << 0;
+    uint256 ROLE_SAV_PROVER = 1 << 1;
+
+    // Contract instances
+    TestableOnkasOujiGame internal game;
+    TestNFT internal nft;
+    TestERC20 internal token;
+    MockPythEntropy internal pyth_entropy;
+    MockRandomizer internal randomizer;
+
+    function register_users(address[] memory players) public {
+        for (uint256 i = 0; i < players.length; i++) {
+            vm.startPrank(players[i]);
+            token.approve(address(game), type(uint256).max);
+            bytes32 secret = keccak256(abi.encodePacked("secret_", players[i]));
+            vm.expectEmit(true, true, false, true, address(game));
+            emit OnkasOujiGame.UserRegistered(secret, players[i]);
+            game.register(secret);
+            vm.stopPrank();
+        }
+    }
+
+    function register_user(address player, bytes32 secret) internal {
+        vm.startPrank(player);
+        vm.deal(player, 0.1 ether);
+        token.approve(address(game), type(uint256).max);
+        vm.expectEmit(true, true, false, true, address(game));
+        emit OnkasOujiGame.UserRegistered(secret, player);
+        game.register(secret);
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Sets up a complete game with players and bets
+     * @param players Two Player structs for the game participants
+     * @param amount Stake amount per player
+     * @param speculations Array of bets to place
+     * @param register If true, registers all participants
+     * @return game_id The created game's ID
+     *
+     * Checks: registrations, balances before/after game creation
+     * and betting, game data validity, active games list inclusion
+     */
+    function setup_game(Player[2] memory players, uint256 amount, Speculation[] memory speculations, bool register)
+        public
+        returns (uint256 game_id)
+    {
+        // Register all users
+        if (register) {
+            address[] memory all_addresses = new address[](players.length + speculations.length);
+            for (uint256 i = 0; i < players.length; i++) {
+                all_addresses[i] = players[i].addr;
+            }
+            for (uint256 i = 0; i < speculations.length; i++) {
+                all_addresses[players.length + i] = speculations[i].speculator;
+            }
+            register_users(all_addresses);
+        }
+
+        // initial balances
+        uint256[2] memory player_initial_balances;
+        uint256[] memory speculator_initial_balances = new uint256[](speculations.length);
+        player_initial_balances[0] = token.balanceOf(players[0].addr);
+        player_initial_balances[1] = token.balanceOf(players[1].addr);
+        console.log("Initial balance for player 0:", player_initial_balances[0]);
+        console.log("Initial balance for player 1:", player_initial_balances[1]);
+        for (uint256 i = 0; i < speculations.length; i++) {
+            speculator_initial_balances[i] = token.balanceOf(speculations[i].speculator);
+            console.log("Initial balance for speculator", i, ":", speculator_initial_balances[i]);
+        }
+
+        // new game
+        game_id = create_game(players, amount);
+
+        // check game state: game data
+        GameData memory game_data = game.get_game(game_id);
+        assertEq(uint8(game_data.status), uint8(GameStatus.OPEN), "Game should be in OPEN status");
+        assertEq(game_data.amount, amount, string.concat("Game amount should be ", vm.toString(amount)));
+        assertEq(game_data.players[0].addr, players[0].addr, "Player 0 address incorrect");
+        assertEq(game_data.players[0].nft_id, players[0].nft_id, "Player 0 NFT ID incorrect");
+        assertEq(game_data.players[1].addr, players[1].addr, "Player 1 address incorrect");
+        assertEq(game_data.players[1].nft_id, players[1].nft_id, "Player 1 NFT ID incorrect");
+        assertEq(game_data.bet_pool, 0, "Bet pool should be empty initially");
+        assertEq(game_data.p1_wins, 0, "Player 1 wins should be 0 initially");
+        assertEq(game_data.p2_wins, 0, "Player 2 wins should be 0 initially");
+
+        // check game state: active games list
+        uint256[] memory active_game_ids = game.get_active_game_ids();
+        bool game_found = false;
+        for (uint256 i = 0; i < active_game_ids.length; i++) {
+            if (active_game_ids[i] == game_id) {
+                game_found = true;
+                break;
+            }
+        }
+        assertTrue(game_found, "Game should be in active games list");
+
+        // check game state: player balances
+        Balance[] memory balances = new Balance[](2);
+        for (uint256 i = 0; i < 2; i++) {
+            balances[i] = Balance(players[i].addr, player_initial_balances[i] - amount);
+        }
+        verify_balances(balances);
+
+        // bets
+        vm.startPrank(cfg.ADDR_OPERATOR);
+        for (uint256 i = 0; i < speculations.length; i++) {
+            game.place_bet(game_id, speculations[i].speculator, speculations[i].prediction, speculations[i].amount);
+            // Check speculator balance after betting
+            uint256 current_balance = token.balanceOf(speculations[i].speculator);
+            console.log("Speculator", i, "balance after betting:", current_balance);
+            assertEq(current_balance, speculator_initial_balances[i] - speculations[i].amount, "Speculator balance not reduced correctly");
+        }
+        vm.stopPrank();
+
+        return game_id;
+    }
+
+    function create_game_and_verify_balances(Player[2] memory players, uint256 amount, uint256 expected_id) internal returns (uint256) {
+        return create_game_and_verify_balances(players, amount, expected_id, bytes32(uint256(0x1337)));
+    }
+
+    function create_game_and_verify_balances(Player[2] memory players, uint256 amount, uint256 expected_id, bytes32 alpha_prefix)
+        internal
+        returns (uint256)
+    {
+        Balance[] memory expected_bals = new Balance[](3);
+        expected_bals[0] = Balance(players[0].addr, token.balanceOf(players[0].addr) - amount);
+        expected_bals[1] = Balance(players[1].addr, token.balanceOf(players[1].addr) - amount);
+        expected_bals[2] = Balance(address(game), token.balanceOf(address(game)) + amount * 2);
+
+        uint256 game_id = create_game(players, amount, expected_id, alpha_prefix);
+        verify_balances(expected_bals);
+        verify_game_status(game_id, GameStatus.OPEN);
+
+        return game_id;
+    }
+
+    function place_bet_and_verify_balances(uint256 game_id, address bettor, bool prediction, uint256 amount) internal {
+        uint256 bettor_balance_before = token.balanceOf(bettor);
+        uint256 contract_balance_before = token.balanceOf(address(game));
+        uint256 bet_pool_before = game.get_game(game_id).bet_pool;
+        Balance[] memory balances = new Balance[](2);
+
+        vm.expectEmit(true, true, true, true, address(game));
+        emit OnkasOujiGame.BetPlaced(game_id, bettor, prediction, amount);
+        vm.prank(cfg.ADDR_OPERATOR);
+        game.place_bet(game_id, bettor, prediction, amount);
+
+        balances[0] = Balance(bettor, bettor_balance_before - amount);
+        balances[1] = Balance(address(game), contract_balance_before + amount);
+        verify_balances(balances);
+
+        // Verify bet pool and game status
+        GameData memory game_data = game.get_game(game_id);
+        assertEq(game_data.bet_pool, bet_pool_before + amount, "Bet pool should contain bettor's funds"); // lol
+        assertEq(uint8(game_data.status), uint8(GameStatus.OPEN), "Game should be in OPEN status");
+    }
+
+    function start_game_and_verify_balances(uint256 game_id) internal {
+        Balance[] memory balances = new Balance[](2);
+        balances[0] = Balance(cfg.ADDR_PLAYER_1, token.balanceOf(cfg.ADDR_PLAYER_1));
+        balances[1] = Balance(cfg.ADDR_PLAYER_2, token.balanceOf(cfg.ADDR_PLAYER_2));
+
+        verify_game_status(game_id, GameStatus.OPEN);
+        (uint256 request_fee,,) = game.calc_fee();
+
+        // Check for RandomnessRequested events for each activated provider
+        uint8 active_sources = game.get_active_sources();
+        console.log("Active sources:", active_sources);
+        if (active_sources & cfg.FLAG_PYTH != 0) {
+            vm.expectEmit(true, true, true, true, address(game));
+            emit Wyrd.RandomnessRequested(game_id, cfg.FLAG_PYTH);
+        }
+        if (active_sources & cfg.FLAG_RANDOMIZER != 0) {
+            vm.expectEmit(true, true, true, true, address(game));
+            emit Wyrd.RandomnessRequested(game_id, cfg.FLAG_RANDOMIZER);
+        }
+        if (active_sources & cfg.FLAG_SAV != 0) {
+            vm.expectEmit(true, true, true, true, address(game));
+            emit Wyrd.RandomnessRequested(game_id, cfg.FLAG_SAV);
+        }
+
+        // start game
+        vm.prank(cfg.ADDR_OPERATOR);
+        vm.expectEmit(true, false, false, false, address(game));
+        emit OnkasOujiGame.GameStarted(game_id);
+        game.start_game{value: request_fee}(game_id);
+        verify_game_status(game_id, GameStatus.ACTIVE);
+
+        // verify balances are unchanged
+        verify_balances(balances);
+    }
+
+    function verify_game_not_active(uint256 game_id) internal view {
+        uint256[] memory active_game_ids = game.get_active_game_ids();
+        bool game_still_active = false;
+        for (uint256 i = 0; i < active_game_ids.length; i++) {
+            if (active_game_ids[i] == game_id) {
+                game_still_active = true;
+                break;
+            }
+        }
+        assertFalse(game_still_active, "Game should be removed from active games list");
+    }
+
+    function create_game(Player[2] memory players, uint256 amount) internal returns (uint256) {
+        return create_game(players, amount, game.get_current_game_id()+1);
+    }
+
+    function create_game(Player[2] memory players, uint256 amount, uint256 expected_id) internal returns (uint256) {
+        return create_game(players, amount, expected_id, bytes32(uint256(0x1337)));
+    }
+
+    function create_game(Player[2] memory players, uint256 amount, uint256 expected_id, bytes32 alpha_prefix) internal returns (uint256) {
+        vm.startPrank(cfg.ADDR_OPERATOR);
+        vm.expectEmit(true, true, false, true, address(game));
+        emit OnkasOujiGame.GameCreated(expected_id, players, amount);
+        uint256 game_id = game.new_game(players, amount, alpha_prefix);
+        vm.stopPrank();
+        return game_id;
+    }
+
+    function verify_balances(Balance[] memory balances) internal view {
+        for (uint256 i = 0; i < balances.length; i++) {
+            Balance memory balance = balances[i];
+            assertEq(token.balanceOf(balance.addr), balance.val, string.concat("Balance incorrect for ", vm.toString(balance.addr)));
+        }
+    }
+
+    function verify_game_status(uint256 game_id, GameStatus expected_status) internal view {
+        GameData memory game_data = game.get_game(game_id);
+        assertEq(uint8(game_data.status), uint8(expected_status), string.concat("Game status should be ", string(abi.encode(expected_status))));
+    }
+
+    function set_user_token_balance(address user, uint256 new_balance) internal {
+        vm.startPrank(user);
+        uint256 current_balance = token.balanceOf(user);
+        if (new_balance < current_balance) {
+            token.transfer(address(0x1), current_balance - new_balance);
+        } else if (new_balance > current_balance) {
+            token.mint(user, new_balance - current_balance);
+        }
+        vm.stopPrank();
+    }
+
+    function abort_game(uint256 game_id) internal {
+        vm.expectEmit(true, false, false, false, address(game));
+        emit OnkasOujiGame.GameAborted(game_id);
+        vm.prank(cfg.ADDR_OPERATOR);
+        game.abort_game(game_id);
+
+        // verify game status is now CANCELLED
+        verify_game_status(game_id, GameStatus.CANCELLED);
+    }
+
+    function exec_game(uint256 game_id) internal {
+        GameData memory game_data = game.get_game(game_id);
+        OnkaStats memory o1_stats_before = game.get_onka_stats(game_data.players[0].nft_id);
+        OnkaStats memory o2_stats_before = game.get_onka_stats(game_data.players[1].nft_id);
+
+        verify_game_status(game_id, GameStatus.ACTIVE);
+
+        vm.expectEmit(true, false, false, false, address(game));
+        emit OnkasOujiGame.GameExecuted(game_id);
+        vm.prank(cfg.ADDR_OPERATOR);
+        game.exec_game(game_id);
+
+        game_data = game.get_game(game_id);
+        verify_game_status(game_id, GameStatus.UNSETTLED);
+
+        // verify onka stats are updated
+        OnkaStats memory o1_stats_after = game.get_onka_stats(game_data.players[0].nft_id);
+        OnkaStats memory o2_stats_after = game.get_onka_stats(game_data.players[1].nft_id);
+
+        assertEq(o1_stats_after.plays, o1_stats_before.plays + 1, "Onka 1 NFT plays should be incremented by 1");
+        assertEq(o2_stats_after.plays, o2_stats_before.plays + 1, "Onka 2 NFT plays should be incremented by 1");
+
+        if (game_data.p1_wins > game_data.p2_wins) {
+            assertEq(o1_stats_after.wins, o1_stats_before.wins + 1, "Onka 1 NFT wins should be incremented by 1");
+            assertEq(o2_stats_after.losses, o2_stats_before.losses + 1, "Onka 2 NFT losses should be incremented by 1");
+        } else {
+            assertEq(o2_stats_after.wins, o2_stats_before.wins + 1, "Onka 2 NFT wins should be incremented by 1");
+            assertEq(o1_stats_after.losses, o1_stats_before.losses + 1, "Onka 1 NFT losses should be incremented by 1");
+        }
+    }
+
+    function verify_bet_pool_state(uint256 game_id, uint256 expected_pool, uint256 expected_p1_bets, uint256 expected_p2_bets) internal view {
+        GameData memory game_data = game.get_game(game_id);
+        assertEq(game_data.bet_pool, expected_pool, "Bet pool amount mismatch");
+
+        // Calculate actual bets on each side
+        (,, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
+        assertEq(p1_depth, expected_p1_bets, "Player1 bets total mismatch");
+        assertEq(p2_depth, expected_p2_bets, "Player2 bets total mismatch");
+    }
+
+    function calculate_expected_payouts(uint256 game_id)
+        internal
+        view
+        returns (
+            uint256 marketing_share,
+            uint256 p_win_share,
+            uint256 bettor_p1_share,
+            uint256 bettor_p2_share
+        )
+    {
+        GameData memory game_data = game.get_game(game_id);
+        uint256 total_pool = game_data.amount * 2 + game_data.bet_pool;
+        uint marketing_share_bets = game_data.bet_pool * game.get_revenue_bps() / 10_000;
+        uint marketing_share_game = (game_data.amount*2) * game.get_revenue_bps() / 10_000;
+        marketing_share = marketing_share_bets + marketing_share_game;
+
+        (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
+
+        p_win_share = game_data.amount * 2;
+
+        if (p1_depth > 0 && p2_depth > 0) {
+            // Both sides have bets
+            uint256 marketing_share_p1 = p1_depth * game.get_revenue_bps() / 10_000;
+            uint256 marketing_share_p2 = p2_depth * game.get_revenue_bps() / 10_000;
+            bettor_p1_share = p1_depth - marketing_share_p1;
+            bettor_p2_share = p2_depth - marketing_share_p2;
+        } else {
+            // One-sided betting pool
+
+        }
+    }
+
+    function complete_created_game_flow(uint256 game_id) internal {
+        // Start game
+        start_game_and_verify_balances(game_id);
+
+        // Process callbacks
+        ext_process_request_callbacks(game_id);
+
+        // Execute game
+        exec_game(game_id);
+
+        // End game
+        vm.prank(cfg.ADDR_OPERATOR);
+        game.end_game(game_id);
+    }
+
+    function setup_game_with_bets(Player[2] memory players, uint256 amount, Speculation[] memory speculations) internal returns (uint256 game_id) {
+        // Register users
+        address[] memory all_addresses = new address[](players.length + speculations.length);
+        for (uint256 i = 0; i < players.length; i++) {
+            all_addresses[i] = players[i].addr;
+        }
+        for (uint256 i = 0; i < speculations.length; i++) {
+            all_addresses[players.length + i] = speculations[i].speculator;
+        }
+        register_users(all_addresses);
+
+        // Create game
+        game_id = create_game(players, amount);
+
+        // Place bets
+        vm.startPrank(cfg.ADDR_OPERATOR);
+        for (uint256 i = 0; i < speculations.length; i++) {
+            game.place_bet(game_id, speculations[i].speculator, speculations[i].prediction, speculations[i].amount);
+        }
+        vm.stopPrank();
+
+        return game_id;
+    }
+}
