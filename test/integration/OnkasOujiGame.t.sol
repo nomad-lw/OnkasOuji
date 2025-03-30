@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test, console} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
+import {FixedPointMathLib as FPML} from "solady/utils/FixedPointMathLib.sol";
 import {Wyrd} from "src/Wyrd.sol";
 import {OnkasOujiGame} from "src/OnkasOujiGame.sol";
 import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from "src/lib/models.sol";
@@ -413,15 +414,76 @@ contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
 
     // Test revenue sharing
     function test_revenue_sharing() public {
-        // Complete a game with bets
-        // Verify marketing wallet receives the correct percentage
+        register_users();
+        uint256 game_amt = 10 ether;
+        uint256 bet_amt = 5 ether;
+
+        uint256[] memory onkas = new uint256[](2);
+        onkas[0] = onka_p1;
+        onkas[1] = onka_p2;
+
+        BaseBet[] memory bets = new BaseBet[](2);
+        bets[0] = BaseBet({amount: bet_amt, side: false});
+        bets[1] = BaseBet({amount: bet_amt, side: true});
+
+        uint256 marketing_balance_before = token.balanceOf(cfg.ADDR_MARKETING);
+
+        // Default revenue sharing (2%)
+        run_game_with_values(game_amt, bets, onkas);
+
+        assertEq(token.balanceOf(cfg.ADDR_MARKETING), marketing_balance_before + 6 gwei * 10 ** 8, "Marketing should receive fee");
+    }
+
+    function testfuzz_revenue_sharing(uint256 rev_share_bps) public {
+        vm.assume(rev_share_bps <= 3000);
+
+        register_users();
+        uint256 game_amt = 10 ether;
+        uint256 bet_amt = 5 ether;
+        uint256 expected_revenue = FPML.fullMulDiv((game_amt * 2 + bet_amt * 2), rev_share_bps, 10_000);
+
+        uint256[] memory onkas = new uint256[](2);
+        onkas[0] = onka_p1;
+        onkas[1] = onka_p2;
+
+        BaseBet[] memory bets = new BaseBet[](2);
+        bets[0] = BaseBet({amount: bet_amt, side: false});
+        bets[1] = BaseBet({amount: bet_amt, side: true});
+
+        uint256 marketing_balance_before = token.balanceOf(cfg.ADDR_MARKETING);
+
+        vm.prank(cfg.ADDR_DEPLOYER);
+        game.set_revenue(rev_share_bps);
+        run_game_with_values(game_amt, bets, onkas);
+
+        assertEq(token.balanceOf(cfg.ADDR_MARKETING), marketing_balance_before + expected_revenue, "Marketing should receive fee");
     }
 
     // Test randomness and game execution
-    function test_game_randomness() public {
-        // Create and start multiple games
-        // Provide different random values
-        // Verify different outcomes
+    function testfuzz_game_randomness(uint8 randomness_sources) public {
+        vm.assume(randomness_sources > 0 && randomness_sources <= 7);
+        // set varying randomness providers & verify execution
+        register_users();
+        uint256 game_amt = 10 ether;
+        uint256 bet_amt = 5 ether;
+
+        uint256[] memory onkas = new uint256[](2);
+        onkas[0] = onka_p1;
+        onkas[1] = onka_p2;
+
+        BaseBet[] memory bets = new BaseBet[](2);
+        bets[0] = BaseBet({amount: bet_amt, side: false});
+        bets[1] = BaseBet({amount: bet_amt, side: true});
+
+        console.log("Randomness sources flags:");
+        if (randomness_sources & 1 == 1) console.log("- Pyth enabled");
+        if (randomness_sources & 2 == 2) console.log("- Randomizer enabled");
+        if (randomness_sources & 4 == 4) console.log("- SAV enabled");
+
+        // specify sources and run
+        vm.prank(cfg.ADDR_DEPLOYER);
+        wyrd.set_sources(randomness_sources);
+        run_game_with_values(game_amt, bets, onkas);
     }
 
     // Test input validation

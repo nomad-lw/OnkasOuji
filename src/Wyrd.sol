@@ -410,9 +410,10 @@ abstract contract Wyrd is IWyrd, OwnableRoles, ReentrancyGuard, IEntropyConsumer
             emit CallbackOnInactiveRequest(req_id, src_flag, src_id);
             return;
         }
+
         req_executions[req_id] ^= src_flag;
-        // req_rand[req_id] ^= beta;
         req_rand[req_id] = keccak256(abi.encodePacked(req_rand[req_id], beta)); // replacing XOR for preimage resistance
+
         emit RandomnessGenerated(req_id, src_flag);
         if (req_executions[req_id] == 0) {
             emit RequestCompleted(req_id);

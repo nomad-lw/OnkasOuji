@@ -90,7 +90,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
 
     uint256 private _bps_revenue = 200; // 2%
     bool private _revshare_enabled = true;
-    address public marketing_wallet;
+    address public revenue_wallet;
 
     // Events
     event GameCreated(uint256 indexed game_id, Player[2] players, uint256 amount);
@@ -102,6 +102,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
     event CallbackOnInactiveGame(uint256 indexed game_id, GameStatus indexed status);
     event UserRegistered(bytes32 indexed secret, address indexed addr);
     event TokenNotSupported(address indexed token, string reason);
+    event RevenueSet(uint256 indexed bps);
 
     /* ▀▀▀ Errors ▀▀▀ */
     error InvalidGame();
@@ -123,9 +124,9 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         address _pyth_provider,
         address _randomizer,
         uint256[2] memory _sav_pk,
-        address _marketing_wallet
+        address _revenue_wallet
     ) Wyrd(7, _pyth_entropy, _pyth_provider, _randomizer, _sav_pk, false) {
-        if (_nft_contract == address(0) || _token_contract == address(0) || _marketing_wallet == address(0)) {
+        if (_nft_contract == address(0) || _token_contract == address(0) || _revenue_wallet == address(0)) {
             revert InvalidInput();
         }
 
@@ -133,7 +134,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         _grantRoles(msg.sender, ROLE_OPERATOR);
         NFT_CONTRACT = IERC721(_nft_contract);
         TOKEN_CONTRACT = IERC20(_token_contract);
-        marketing_wallet = _marketing_wallet;
+        revenue_wallet = _revenue_wallet;
     }
 
     /* ▀▀▀ View/Pure Functions ▀▀▀ */
@@ -399,7 +400,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
                 }
             }
         }
-        if (_revshare_enabled) STL.safeTransfer(address(TOKEN_CONTRACT), marketing_wallet, bet_rake + player_rake);
+        if (_revshare_enabled) STL.safeTransfer(address(TOKEN_CONTRACT), revenue_wallet, bet_rake + player_rake);
 
         // event
         uint8 rlen = uint8(game.rounds.length);
@@ -430,12 +431,36 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         emit GameAborted(game_id);
     }
 
-    function set_marketing_address(address addr) external onlyOwner {
-        marketing_wallet = addr;
+    function set_revenue_address(address addr) external onlyOwner {
+        revenue_wallet = addr;
     }
 
     function set_revenue(uint256 bps) external onlyOwner {
+        if (bps > 3_000) revert InvalidInput();
         _bps_revenue = bps;
+    }
+
+    function recover_erc20(address token) external onlyOwner {
+        if (token == address(TOKEN_CONTRACT)) {
+            uint256 balance = TOKEN_CONTRACT.balanceOf(address(this));
+            STL.safeTransfer(address(TOKEN_CONTRACT), msg.sender, balance);
+        } else {
+            try IERC20(token).balanceOf(address(this)) returns (uint256 balance) {
+                if (balance > 0) {
+                    STL.safeTransfer(token, msg.sender, balance);
+                }
+            } catch {
+                emit TokenNotSupported(token, "Not an ERC20");
+            }
+        }
+    }
+
+    function recover_erc721(address token, uint256 token_id) external onlyOwner {
+        try IERC721(token).ownerOf(token_id) {
+            IERC721(token).safeTransferFrom(address(this), msg.sender, token_id);
+        } catch {
+            emit TokenNotSupported(token, "Not an ERC721 or invalid token ID");
+        }
     }
 
     function _validate_player(Player memory player) internal view {
@@ -460,29 +485,6 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             for (uint256 i; i < length; ++i) {
                 STL.safeTransfer(address(TOKEN_CONTRACT), specs[i].speculator, specs[i].amount);
             }
-        }
-    }
-
-    function recover_erc20(address token) external onlyOwner {
-        if (token == address(TOKEN_CONTRACT)) {
-            uint256 balance = TOKEN_CONTRACT.balanceOf(address(this));
-            STL.safeTransfer(address(TOKEN_CONTRACT), msg.sender, balance);
-        } else {
-            try IERC20(token).balanceOf(address(this)) returns (uint256 balance) {
-                if (balance > 0) {
-                    STL.safeTransfer(token, msg.sender, balance);
-                }
-            } catch {
-                emit TokenNotSupported(token, "Not an ERC20");
-            }
-        }
-    }
-
-    function recover_erc721(address token, uint256 token_id) external onlyOwner {
-        try IERC721(token).ownerOf(token_id) {
-            IERC721(token).safeTransferFrom(address(this), msg.sender, token_id);
-        } catch {
-            emit TokenNotSupported(token, "Not an ERC721 or invalid token ID");
         }
     }
 }

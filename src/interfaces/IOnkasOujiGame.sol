@@ -29,6 +29,6 @@ interface IOnkasOujiGame is IWyrd {
     function start_game(uint256 game_id) external payable;
     function end_game(uint256 game_id) external;
     function abort_game(uint256 game_id) external;
-    function set_marketing_address(address addr) external;
+    function set_revenue_address(address addr) external;
     function set_revenue(uint256 bps) external;
 }

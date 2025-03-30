@@ -369,6 +369,16 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
     MockPythEntropy internal pyth_entropy;
     MockRandomizer internal randomizer;
 
+    function register_users() public {
+        // run with common sense defaults
+        address[] memory users = new address[](4);
+        users[0] = cfg.ADDR_PLAYER_1;
+        users[1] = cfg.ADDR_PLAYER_2;
+        users[2] = cfg.ADDR_BETOOR_1;
+        users[3] = cfg.ADDR_BETOOR_2;
+        register_users(users);
+    }
+
     function register_users(address[] memory players) public {
         for (uint256 i = 0; i < players.length; i++) {
             vm.startPrank(players[i]);
