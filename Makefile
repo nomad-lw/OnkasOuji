@@ -13,6 +13,8 @@ build-essential: src/Wyrd.sol src/OnkasOujiGame.sol
 
 test:
 	@forge test -v
+	@echo "Cleaning up temporary files..."
+	@rm vrf_proof*.json -v
 
 deploy-testnet: script/Deploy.s.sol
 	@forge script script/Deploy.s.sol:DeployScript \

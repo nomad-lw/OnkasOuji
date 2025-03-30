@@ -41,6 +41,10 @@ struct Args {
     /// Soft mode
     #[arg(long)]
     soft: bool,
+
+    // JSON output file suffix
+    #[arg(short, long, default_value = "")]
+    json: String,
 }
 
 #[derive(Debug)]
@@ -101,6 +105,7 @@ fn generate_vrf_proof(
     force_key_gen: bool,
     silent: bool,
     soft: bool,
+    json: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Initialization of VRF context by providing a curve
     let mut vrf = ECVRF::from_suite(CipherSuite::SECP256K1_SHA256_TAI).unwrap();
@@ -129,7 +134,7 @@ fn generate_vrf_proof(
         print!("{}", json_data.to_string());
     } else {
         // Write the JSON object to a file
-        let mut file = File::create("vrf_proof.json")?;
+        let mut file = File::create(format!("vrf_proof{}.json", json))?;
         file.write_all(json_data.to_string().as_bytes())?;
     }
 
@@ -183,7 +188,7 @@ fn main() {
     // Generate the VRF proof and export to JSON file
     match args.operation.as_str() {
         "prove" => {
-            if let Err(e) = generate_vrf_proof(&message, args.force_key_gen, args.silent, args.soft) {
+            if let Err(e) = generate_vrf_proof(&message, args.force_key_gen, args.silent, args.soft, &args.json) {
                 if !args.silent {
                     eprintln!("Error generating VRF proof: {}", e);
                 } else {
@@ -192,7 +197,7 @@ fn main() {
                 std::process::exit(1);
             }
             if !args.silent {
-                println!("VRF proof generated and exported to vrf_proof.json");
+                println!("VRF proof generated and exported to vrf_proof{}.json", args.json);
             } else {
                 if args.soft {
                     // No operation if soft is true

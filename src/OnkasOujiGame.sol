@@ -203,7 +203,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         // calc depths
         unchecked {
             for (uint256 i; i < specs_length; ++i) {
-                if (specs[i].prediction) {
+                if (!specs[i].prediction) {
                     p1_depth += specs[i].amount;
                 } else {
                     p2_depth += specs[i].amount;
@@ -327,10 +327,8 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             // wins and health
             if (roll_w0) {
                 p1_wins++;
-                // p2_health = (WINS_REQUIRED - p1_wins) * HEALTH_PER_LIFE;
             } else {
                 p2_wins++;
-                // p1_health = (WINS_REQUIRED - p2_wins) * HEALTH_PER_LIFE;
             }
             rounds[round] = RoundResult({roll_p1: roll_p1, roll_p2: roll_p2, p1_won: roll_w0});
         }
@@ -393,7 +391,8 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             Speculation[] memory specs = game.speculations;
             uint256 spec_length = specs.length;
             for (uint256 i; i < spec_length; ++i) {
-                if (specs[i].prediction == w0) {
+                // prediction (true: idx(0), false: idx(1)). w0 is if winner idx is 0
+                if (specs[i].prediction != w0) {
                     uint256 weight = FPML.divWad(specs[i].amount, winning_pool);
                     uint256 payout = FPML.mulWad(pool, weight);
                     STL.safeTransfer(address(TOKEN_CONTRACT), specs[i].speculator, payout);

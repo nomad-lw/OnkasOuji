@@ -16,6 +16,7 @@ import {MockPythEntropy, MockRandomizer} from "test/mocks/MockRandomProviders.t.
 import {TestNFT} from "test/mocks/MockERC721.t.sol";
 import {TestERC20} from "test/mocks/MockERC20.t.sol";
 import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from "src/lib/models.sol";
+import {FixedPointMathLib as FPML} from "solady/utils/FixedPointMathLib.sol";
 
 interface ITestableWyrd is IWyrd {
     function vrf_tester() external returns (VRFTestData);
@@ -344,12 +345,17 @@ abstract contract WyrdTestHelpers is Test {
     }
 }
 
-abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
-    struct Balance {
-        address addr;
-        uint256 val;
-    }
+struct Balance {
+    address addr;
+    uint256 val;
+}
 
+struct BaseBet {
+    uint256 amount;
+    bool side;
+}
+
+abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
     // Constants
     uint256 internal constant GAME_AMOUNT = 100 * 10 ** 18;
     uint256 internal constant BET_AMOUNT = 10 * 10 ** 18;
@@ -383,6 +389,15 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
         emit OnkasOujiGame.UserRegistered(secret, player);
         game.register(secret);
         vm.stopPrank();
+    }
+
+    function setup_user() internal returns (address) {
+        address user = vm.randomAddress();
+        vm.prank(cfg.ADDR_DEPLOYER);
+        token.mint(user, 100 ether);
+        bytes32 secret = keccak256(abi.encodePacked("secret_", user));
+        register_user(user, secret);
+        return user;
     }
 
     /**
@@ -469,6 +484,10 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
         vm.stopPrank();
 
         return game_id;
+    }
+
+    function create_game_and_verify_balances(Player[2] memory players, uint256 amount) internal returns (uint256) {
+        return create_game_and_verify_balances(players, amount, game.get_current_game_id() + 1, bytes32(uint256(0x1337)));
     }
 
     function create_game_and_verify_balances(Player[2] memory players, uint256 amount, uint256 expected_id) internal returns (uint256) {
@@ -560,7 +579,7 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
     }
 
     function create_game(Player[2] memory players, uint256 amount) internal returns (uint256) {
-        return create_game(players, amount, game.get_current_game_id()+1);
+        return create_game(players, amount, game.get_current_game_id() + 1);
     }
 
     function create_game(Player[2] memory players, uint256 amount, uint256 expected_id) internal returns (uint256) {
@@ -650,36 +669,51 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
         assertEq(p2_depth, expected_p2_bets, "Player2 bets total mismatch");
     }
 
-    function calculate_expected_payouts(uint256 game_id)
-        internal
-        view
-        returns (
-            uint256 marketing_share,
-            uint256 p_win_share,
-            uint256 bettor_p1_share,
-            uint256 bettor_p2_share
-        )
-    {
+    function calculate_expected_payouts(uint256 game_id) internal view returns (uint256 marketing_share, uint256 p_win_share, uint256 bettor_share) {
         GameData memory game_data = game.get_game(game_id);
-        uint256 total_pool = game_data.amount * 2 + game_data.bet_pool;
-        uint marketing_share_bets = game_data.bet_pool * game.get_revenue_bps() / 10_000;
-        uint marketing_share_game = (game_data.amount*2) * game.get_revenue_bps() / 10_000;
-        marketing_share = marketing_share_bets + marketing_share_game;
+        uint256 player_winning = game_data.amount * 2;
+        uint256 bet_winning = game_data.bet_pool;
+        // uint256 total_pool = game_data.amount * 2 + game_data.bet_pool;
+        uint256 rev_bets = bet_winning * game.get_revenue_bps() / 10_000;
+        uint256 rev_game = player_winning * game.get_revenue_bps() / 10_000;
+        player_winning = player_winning - rev_game;
+        bet_winning = bet_winning - rev_bets;
 
         (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
 
-        p_win_share = game_data.amount * 2;
+        p_win_share = player_winning;
 
         if (p1_depth > 0 && p2_depth > 0) {
             // Both sides have bets
-            uint256 marketing_share_p1 = p1_depth * game.get_revenue_bps() / 10_000;
-            uint256 marketing_share_p2 = p2_depth * game.get_revenue_bps() / 10_000;
-            bettor_p1_share = p1_depth - marketing_share_p1;
-            bettor_p2_share = p2_depth - marketing_share_p2;
+            bettor_share = bet_winning;
+            marketing_share = rev_bets + rev_game;
         } else {
             // One-sided betting pool
-
+            marketing_share = rev_game;
         }
+    }
+
+    function end_game(uint256 game_id) internal {
+        // End game
+        GameData memory game_data = game.get_game(game_id);
+        bool w0 = game_data.p1_wins > game_data.p2_wins;
+        uint8 rlen = uint8(game_data.rounds.length);
+        RoundResult[5] memory rounds;
+        for (uint8 i; i < rlen; ++i) {
+            rounds[i] = game_data.rounds[i];
+        }
+        unchecked {
+            for (uint8 i = 0; i < rlen; i++) {
+                assertEq(uint8(rounds[i].roll_p1), uint8(game_data.rounds[i].roll_p1), "Roll p1 mismatch");
+                assertEq(uint8(rounds[i].roll_p2), uint8(game_data.rounds[i].roll_p2), "Roll p2 mismatch");
+                assertEq(rounds[i].p1_won, game_data.rounds[i].p1_won, "Round winner mismatch");
+            }
+        }
+
+        vm.expectEmit(true, true, false, true, address(game));
+        emit OnkasOujiGame.GameCompleted(game_id, uint8(w0 ? 0 : 1), rounds);
+        vm.prank(cfg.ADDR_OPERATOR);
+        game.end_game(game_id);
     }
 
     function complete_created_game_flow(uint256 game_id) internal {
@@ -693,8 +727,90 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
         exec_game(game_id);
 
         // End game
-        vm.prank(cfg.ADDR_OPERATOR);
-        game.end_game(game_id);
+        end_game(game_id);
+    }
+
+    function run_game_with_values(uint256 amt, BaseBet[] memory bets, uint256[] memory onkas) internal {
+        // Record balances before game completion
+        uint256 player1_balance_before = token.balanceOf(cfg.ADDR_PLAYER_1);
+        uint256 player2_balance_before = token.balanceOf(cfg.ADDR_PLAYER_2);
+        uint256 marketing_balance_before = token.balanceOf(cfg.ADDR_MARKETING);
+        uint256 game_balance_before = token.balanceOf(address(game));
+        uint256 onka_p1 = onkas[0];
+        uint256 onka_p2 = onkas[1];
+        // Setup bettors
+        address[] memory bettors = new address[](bets.length);
+        uint256[] memory bettor_balances_before = new uint256[](bets.length);
+        for (uint256 i = 0; i < bets.length; i++) {
+            bettors[i] = setup_user();
+            bettor_balances_before[i] = token.balanceOf(bettors[i]);
+        }
+
+        // Create game
+        uint256 game_id = create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], amt);
+
+        // place bets
+        uint256[3] memory expected_betpool = [uint256(0), uint256(0), uint256(0)];
+        for (uint256 i = 0; i < bets.length; i++) {
+            place_bet_and_verify_balances(game_id, bettors[i], bets[i].side, bets[i].amount);
+            expected_betpool[0] += bets[i].amount;
+            expected_betpool[bets[i].side ? 2 : 1] += bets[i].amount;
+            verify_bet_pool_state(game_id, expected_betpool[0], expected_betpool[1], expected_betpool[2]);
+        }
+        (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
+        assertEq(p1_depth, expected_betpool[1], "Player1 depth mismatch");
+        assertEq(p2_depth, expected_betpool[2], "Player2 depth mismatch");
+
+        // start game
+        start_game_and_verify_balances(game_id);
+
+        // Process callbacks
+        ext_process_request_callbacks(game_id);
+
+        // Execute game
+        exec_game(game_id);
+
+        // End game
+        end_game(game_id);
+
+        GameData memory game_data = game.get_game(game_id);
+        bool player1_won = game_data.p1_wins > game_data.p2_wins;
+        (uint256 marketing_share, uint256 p_win_share, uint256 bettor_share) = calculate_expected_payouts(game_id);
+
+        // Verify balances after game completion
+        Balance[] memory balances = new Balance[](4 + bets.length);
+        balances[0] = Balance(cfg.ADDR_PLAYER_1, player1_balance_before + (player1_won ? p_win_share : 0) - amt);
+        balances[1] = Balance(cfg.ADDR_PLAYER_2, player2_balance_before + (player1_won ? 0 : p_win_share) - amt);
+        balances[2] = Balance(cfg.ADDR_MARKETING, marketing_balance_before + marketing_share);
+        // balances[3] = Balance(address(game), game_balance_before);
+
+        // Verify bettor balances
+        for (uint256 i = 0; i < bets.length; i++) {
+            uint256 expected_winnings = 0;
+            uint256 expected_expense = 0;
+            if ((!bets[i].side) == player1_won) {
+                if (p1_depth > 0 && p2_depth > 0) {
+                    uint256 weight = FPML.divWad(bets[i].amount, player1_won ? p1_depth : p2_depth);
+                    expected_winnings = FPML.mulWad(bettor_share, weight);
+                    expected_expense = bets[i].amount;
+                }
+            } else {
+                if (p1_depth > 0 && p2_depth > 0) {
+                    expected_expense = bets[i].amount;
+                }
+            }
+            balances[4 + i] = Balance(bettors[i], bettor_balances_before[i] + expected_winnings - expected_expense);
+        }
+
+        verify_balances(balances);
+        uint256 epsilon = (5 wei * bets.length) + 1 wei;
+        assertLt(token.balanceOf(address(game)), game_balance_before + epsilon, "Contract balance should be the same (within epsilon)");
+
+        // Verify game is no longer active
+        verify_game_not_active(game_id);
+
+        // Verify game status is COMPLETED
+        verify_game_status(game_id, GameStatus.COMPLETED);
     }
 
     function setup_game_with_bets(Player[2] memory players, uint256 amount, Speculation[] memory speculations) internal returns (uint256 game_id) {

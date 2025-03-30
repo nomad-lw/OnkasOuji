@@ -178,20 +178,23 @@ contract VRFTestData is Test {
         console.logBytes32(alpha);
 
         console.log("Revised length of message (alpha):", alpha.length);
-        string[] memory inputs = new string[](6);
+        string[] memory inputs = new string[](8);
+        string memory output_file_suffix = vm.toString(vm.unixTime());
         inputs[0] = "test/utils/gen_vrf/target/debug/gen_vrf";
         inputs[1] = "-o";
         inputs[2] = "prove";
         inputs[3] = "-m";
         inputs[4] = encoded_alpha;
         inputs[5] = "--silent";
+        inputs[6] = "--json";
+        inputs[7] = output_file_suffix;
         // inputs[6] = "--soft";
         console.log("Encoded alpha:", encoded_alpha);
 
         bytes memory res = vm.ffi(inputs);
         console.log("res:", string(res));
         assertEq(string(res), "Ok");
-        VrfData memory vrf_data = load_vrf_proof(false);
+        VrfData memory vrf_data = load_vrf_proof(false, output_file_suffix);
         // VrfData memory vrf_data = parse_vrf_json(string(res));
         assertEq(bytes32(vrf_data.message), alpha);
 
@@ -224,9 +227,9 @@ contract VRFTestData is Test {
     }
 
     function get_pk() public returns (uint256[2] memory) {
-        generate_vrf_proof(bytes32(hex"1337"));
-        VrfData memory vrf_data = load_vrf_proof(true);
-        return VRF.decodePoint(vrf_data.public_key);
+        (,,,,,, bytes memory public_key) = generate_vrf_proof(bytes32(hex"1337"));
+        // VrfData memory vrf_data = load_vrf_proof(true);
+        return VRF.decodePoint(public_key);
     }
 
     function parse_vrf_json(string memory json) internal pure returns (VrfData memory vrf_data) {
@@ -241,8 +244,12 @@ contract VRFTestData is Test {
     }
 
     function load_vrf_proof(bool dummy) public returns (VrfData memory vrf_data) {
+        return load_vrf_proof(dummy, "");
+    }
+
+    function load_vrf_proof(bool dummy, string memory output_file) public returns (VrfData memory vrf_data) {
         string memory ROOT = vm.projectRoot();
-        string memory PATH = string.concat(ROOT, "/vrf_proof.json");
+        string memory PATH = string.concat(ROOT, "/vrf_proof", output_file, ".json");
         // vm.sleep(1000);
         string memory json = vm.readFile(PATH);
         console.log("Raw Data:", json);

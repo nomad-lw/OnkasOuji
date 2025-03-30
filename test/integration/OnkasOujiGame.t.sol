@@ -9,7 +9,7 @@ import {GameData, GameStatus, Player, Speculation, RoundResult, OnkaStats} from 
 
 import {VRFTestData} from "test/utils/VRFTestData.sol";
 import "test/config.sol" as cfg;
-import {OnkasOujiGameTestHelpers, TestableOnkasOujiGame} from "test/integration/Helpers.t.sol";
+import {OnkasOujiGameTestHelpers, TestableOnkasOujiGame, BaseBet, Balance} from "test/integration/Helpers.t.sol";
 
 import {MockPythEntropy, MockRandomizer} from "test/mocks/MockRandomProviders.t.sol";
 import {TestNFT} from "test/mocks/MockERC721.t.sol";
@@ -102,7 +102,7 @@ contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
     }
 
     // Test full game flow - from creation to completion
-    function t7est_complete_game_flow() public {
+    function test_complete_game_flow() public {
         // 1. Register players
         // 2. Create a new game
         // 3. Place bets from multiple bettors
@@ -110,72 +110,32 @@ contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
         // 5. Execute game (simulate randomness callback)
         // 6. Complete game and verify payouts
         // 7. Check balances of all participants
-        // 8. Verify NFT stats are updated
+        // 8. Verify NFT stats are updated (TODO: not implemented here)
 
-        // Use run_game to start a game between Player1 and Player2 with 3 bets
-        // Setup players and speculators
-        Player[2] memory players = [Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)];
+        uint256 amount = 13 ether + 37 gwei;
+        uint256 bet = 17 ether + 53 gwei;
 
-        // Create 3 speculation structures for bettors
-        Speculation[] memory speculations = new Speculation[](3);
-        speculations[0] = Speculation(cfg.ADDR_BETOOR_1, true, 5 ether); // Bettor1 betting on Player1
-        speculations[1] = Speculation(cfg.ADDR_BETOOR_2, false, 7 ether); // Bettor2 betting on Player2
-        speculations[2] = Speculation(cfg.ADDR_BETOOR_3, true, 3 ether); // Bettor3 betting on Player1
+        // Setup: register users which also approves tokens
+        address[] memory users = new address[](2);
+        users[0] = cfg.ADDR_PLAYER_1;
+        users[1] = cfg.ADDR_PLAYER_2;
+        register_users(users);
 
-        // Start the game with players and speculations
-        uint256 game_id = setup_game(players, GAME_AMOUNT, speculations, true);
+        // prep helper struct values
+        BaseBet[] memory bets = new BaseBet[](1);
+        bets[0] = BaseBet({amount: bet, side: true});
+        uint256[] memory onkas = new uint256[](2);
+        onkas[0] = onka_p1;
+        onkas[1] = onka_p2;
 
-        // Record balances before finishing the game
-        uint256 player1_balance_before = token.balanceOf(cfg.ADDR_PLAYER_1);
-        uint256 player2_balance_before = token.balanceOf(cfg.ADDR_PLAYER_2);
-        uint256 bettor1_balance_before = token.balanceOf(cfg.ADDR_BETOOR_1);
-        uint256 bettor2_balance_before = token.balanceOf(cfg.ADDR_BETOOR_2);
-        uint256 bettor3_balance_before = token.balanceOf(cfg.ADDR_BETOOR_3);
-        uint256 marketing_balance_before = token.balanceOf(cfg.ADDR_MARKETING);
-
-        // Start the game and prepare for randomness
-        vm.startPrank(cfg.ADDR_OPERATOR);
-        (uint256 request_fee,,) = game.calc_fee();
-        game.start_game{value: request_fee}(game_id);
-
-        // Simulate randomness callback with a value that Player1 will win
-        // Set entropy for PLAYER1 WIN (first player wins if first roll is higher)
-        game.exec_game(game_id);
-        game.end_game(game_id);
-        vm.stopPrank();
-
-        // Verify game is complete
-        GameData memory completed_game = game.get_game(game_id);
-        assertEq(uint8(completed_game.status), uint8(GameStatus.COMPLETED), "Game should be completed");
-
-        // Check NFT stats are updated
-        // OnkaStats memory p1_stats = game.get_onka_stats(onka_p1);
-        // OnkaStats memory p2_stats = game.get_onka_stats(onka_p2);
-        // assertEq(p1_stats.plays, 1, "Player1 NFT should have 1 play");
-        // assertEq(p2_stats.plays, 1, "Player2 NFT should have 1 play");
-
-        // Verify game no longer in active games list
-        uint256[] memory active_games = game.get_active_game_ids();
-        bool game_still_active = false;
-        for (uint256 i = 0; i < active_games.length; i++) {
-            if (active_games[i] == game_id) {
-                game_still_active = true;
-                break;
-            }
-        }
-        assertFalse(game_still_active, "Game should be removed from active games");
-
-        // Check appropriate balances after game completion
-        console.log("Checking final balances after game completion");
-        // Note: specific balance checks would depend on game outcome and revenue sharing settings
+        // run game (see helper fn for mock/implementation reference)
+        run_game_with_values(amount, bets, onkas);
     }
 
     // Test user registration and game creation
     function test_register_and_create_game() public {
-        // Register player 1
+        // Register players
         register_user(cfg.ADDR_PLAYER_1, bytes32("secret_PLAYER_1"));
-
-        // Register player 2
         register_user(cfg.ADDR_PLAYER_2, bytes32("secret_PLAYER_2"));
 
         // Player 3: failed registration
@@ -195,7 +155,6 @@ contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
 
         // Test new game creation - create a game between player1 and player2 with 10 ether stake
         // This will check event emission, token transfers, and game state initialization
-
         create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], 10 ether, 1);
 
         // 1. Test with non-registered user (Player 4 isn't registered, but as long as sufficient approval exists, game creation should succeed)
@@ -305,40 +264,62 @@ contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
         users[3] = cfg.ADDR_BETOOR_2;
         register_users(users);
 
+        uint256[] memory onkas = new uint256[](2);
+        onkas[0] = onka_p1;
+        onkas[1] = onka_p2;
+
         uint256 amount = 10 ether;
-        uint256 game_id = create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], amount, 1);
 
-        // Test 1: Basic bet placement
-        uint256 bet_amount1 = 5 ether;
-        place_bet_and_verify_balances(game_id, cfg.ADDR_BETOOR_1, true, bet_amount1);
-        verify_bet_pool_state(game_id, bet_amount1, bet_amount1, 0);
+        // Test 1A: One-Sided bet placement
+        // uint256 bet_amount1 = 5 ether;
+        // place_bet_and_verify_balances(game_id, cfg.ADDR_BETOOR_1, true, bet_amount1);
+        // verify_bet_pool_state(game_id, bet_amount1, 0,bet_amount1);
+        BaseBet[] memory bets1a = new BaseBet[](1);
+        bets1a[0] = BaseBet({amount: 5 ether, side: true});
+        run_game_with_values(amount, bets1a, onkas);
 
-        // Test 2: Second bet on same side
-        uint256 bet_amount2 = 3 ether;
-        place_bet_and_verify_balances(game_id, cfg.ADDR_BETOOR_2, true, bet_amount2);
-        verify_bet_pool_state(game_id, bet_amount1 + bet_amount2, bet_amount1 + bet_amount2, 0);
+        // Test 1B: Multiple One-Sided bets
+        // uint256 bet_amount2 = 3 ether;
+        // place_bet_and_verify_balances(game_id, cfg.ADDR_BETOOR_2, true, bet_amount2);
+        // verify_bet_pool_state(game_id, bet_amount1 + bet_amount2,0, bet_amount1 + bet_amount2);
+        BaseBet[] memory bets1b = new BaseBet[](2);
+        bets1b[0] = BaseBet({amount: 3 ether, side: false});
+        bets1b[1] = BaseBet({amount: 2 ether, side: false});
+        run_game_with_values(amount + 1 gwei, bets1b, onkas);
 
-        // Test 3: Bet on opposite side
-        uint256 bet_amount3 = 7 ether;
-        place_bet_and_verify_balances(game_id, cfg.ADDR_BETOOR_2, false, bet_amount3);
-        verify_bet_pool_state(game_id, bet_amount1 + bet_amount2 + bet_amount3, bet_amount1 + bet_amount2, bet_amount3);
+        // Test 2A: Bet on opposite sides
+        // uint256 bet_amount3 = 7 ether;
+        // place_bet_and_verify_balances(game_id, cfg.ADDR_BETOOR_2, false, bet_amount3);
+        // verify_bet_pool_state(game_id, bet_amount1 + bet_amount2 + bet_amount3,bet_amount3, bet_amount1 + bet_amount2);
+        BaseBet[] memory bets2a = new BaseBet[](2);
+        bets2a[0] = BaseBet({amount: 7 ether, side: false});
+        bets2a[1] = BaseBet({amount: 7 ether, side: true});
+        run_game_with_values(amount + 2 gwei, bets2a, onkas);
+
+        // Test 2B: Multiple Bets on opposite sides
+        BaseBet[] memory bets2b = new BaseBet[](4);
+        bets2b[0] = BaseBet({amount: 7 ether, side: true});
+        bets2b[1] = BaseBet({amount: 7 ether, side: false});
+        bets2b[2] = BaseBet({amount: 11 gwei, side: false});
+        bets2b[3] = BaseBet({amount: 11 gwei, side: true});
+        run_game_with_values(amount + 3 gwei, bets2b, onkas);
+
+        // Test 3A: Asymmetric Bet on opposite sides
+        BaseBet[] memory bets3a = new BaseBet[](2);
+        bets3a[0] = BaseBet({amount: 2 ether, side: true});
+        bets3a[1] = BaseBet({amount: 7 ether, side: false});
+        run_game_with_values(amount + 4 gwei, bets3a, onkas);
+
+        // Test 3B: Multiple Asymmetric Bets on opposite sides
+        BaseBet[] memory bets3b = new BaseBet[](5);
+        bets3b[0] = BaseBet({amount: 2 ether, side: true});
+        bets3b[1] = BaseBet({amount: 7 ether, side: false});
+        bets3b[2] = BaseBet({amount: 11 gwei, side: false});
+        bets3b[3] = BaseBet({amount: 13 gwei, side: true});
+        bets3b[4] = BaseBet({amount: 1 ether, side: true});
+        run_game_with_values(amount + 5 gwei, bets3b, onkas);
 
         // Test 4: Betting after game starts should fail
-        start_game_and_verify_balances(game_id);
-
-        vm.startPrank(cfg.ADDR_OPERATOR);
-        vm.expectRevert();
-        game.place_bet(game_id, cfg.ADDR_BETOOR_1, true, 1 ether);
-        vm.stopPrank();
-
-        // Test 5: Complete game flow with bets and verify payouts
-        // Abort current game first
-        abort_game(game_id);
-
-        // bets
-        Speculation[] memory speculations = new Speculation[](2);
-        speculations[0] = Speculation(cfg.ADDR_BETOOR_1, true, 5 ether); // Bet on P1
-        speculations[1] = Speculation(cfg.ADDR_BETOOR_2, false, 7 ether); // Bet on P2
 
         // Record balances before game completion
         uint256 player1_balance_before = token.balanceOf(cfg.ADDR_PLAYER_1);
@@ -347,9 +328,47 @@ contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
         uint256 bettor2_balance_before = token.balanceOf(cfg.ADDR_BETOOR_2);
         uint256 marketing_balance_before = token.balanceOf(cfg.ADDR_MARKETING);
 
+        uint256 game_id = create_game_and_verify_balances([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], amount);
+        start_game_and_verify_balances(game_id);
+
+        vm.startPrank(cfg.ADDR_OPERATOR);
+        vm.expectRevert();
+        game.place_bet(game_id, cfg.ADDR_BETOOR_1, true, 1 ether);
+        vm.stopPrank();
+
+        // Abort current game first
+        abort_game(game_id);
+
+        // Verify all participants received refunds
+        Balance[] memory expected_bals = new Balance[](4);
+        expected_bals[0] = Balance(cfg.ADDR_PLAYER_1, player1_balance_before);
+        expected_bals[1] = Balance(cfg.ADDR_PLAYER_2, player2_balance_before);
+        expected_bals[2] = Balance(cfg.ADDR_BETOOR_1, bettor1_balance_before);
+        expected_bals[3] = Balance(cfg.ADDR_BETOOR_2, bettor2_balance_before);
+        verify_balances(expected_bals);
+
+        // reset expected balances
+        player1_balance_before = token.balanceOf(cfg.ADDR_PLAYER_1);
+        player2_balance_before = token.balanceOf(cfg.ADDR_PLAYER_2);
+        bettor1_balance_before = token.balanceOf(cfg.ADDR_BETOOR_1);
+        bettor2_balance_before = token.balanceOf(cfg.ADDR_BETOOR_2);
+        marketing_balance_before = token.balanceOf(cfg.ADDR_MARKETING);
+
+        // Test 5: Complete game flow with bets and verify payouts with MANUALLY verified calcs
+
+        // bets
+        Speculation[] memory speculations = new Speculation[](2);
+        uint256 amt = 10 ether;
+        uint256 bet1 = 5 ether;
+        uint256 bet2 = 7 ether;
+        uint256 rev = 64 gwei * 10 ** 7; // 0.64 ether (2% of 32 ether)
+        speculations[0] = Speculation(cfg.ADDR_BETOOR_1, false, bet1); // Bet on P1
+        speculations[1] = Speculation(cfg.ADDR_BETOOR_2, true, bet2); // Bet on P2
+
         // Create new game
-        game_id = setup_game_with_bets([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], amount, speculations);
-        // Complete game using helper
+        uint256 game_contract_balance_before = token.balanceOf(address(game));
+        game_id = setup_game_with_bets([Player(cfg.ADDR_PLAYER_1, onka_p1), Player(cfg.ADDR_PLAYER_2, onka_p2)], amt, speculations);
+        // Finish game
         complete_created_game_flow(game_id);
 
         // Verify balances after game completion
@@ -357,17 +376,39 @@ contract OnkasOujiGameIntegrationTest is OnkasOujiGameTestHelpers {
         bool player1_won = game_data.p1_wins > game_data.p2_wins;
 
         // Calculate expected payouts using helper
-        (uint256 marketing_share,uint256 p_win_share, uint256 bettor_p1_share,) = calculate_expected_payouts(game_id);
+        (uint256 marketing_share, uint256 p_win_share, uint256 bettor_share) = calculate_expected_payouts(game_id);
 
         if (player1_won) {
+            assertEq(
+                token.balanceOf(cfg.ADDR_PLAYER_1),
+                player1_balance_before + ((amt * 2 - 40 gwei * 10 ** 7) - amt),
+                "(Static value check) Player1 should receive winnings"
+            );
             assertEq(token.balanceOf(cfg.ADDR_PLAYER_1), player1_balance_before - amount + p_win_share, "Player1 should receive winnings");
-            assertEq(token.balanceOf(cfg.ADDR_BETOOR_1), bettor1_balance_before - 5 ether + bettor_p1_share, "Bettor1 should receive winnings");
+            assertEq(
+                token.balanceOf(cfg.ADDR_BETOOR_1),
+                bettor1_balance_before - bet1 + (1176 gwei * 10 ** 7),
+                "(Static value check) Bettor1 should receive winnings"
+            );
+            assertEq(token.balanceOf(cfg.ADDR_BETOOR_1), bettor1_balance_before - bet1 + bettor_share, "Bettor1 should receive winnings");
         } else {
+            assertEq(
+                token.balanceOf(cfg.ADDR_PLAYER_2),
+                player2_balance_before + ((amt * 2 - 40 gwei * 10 ** 7) - amt),
+                "(Static value check) Player2 should receive winnings"
+            );
             assertEq(token.balanceOf(cfg.ADDR_PLAYER_2), player2_balance_before - amount + p_win_share, "Player2 should receive winnings");
+            assertEq(token.balanceOf(cfg.ADDR_BETOOR_2), bettor2_balance_before - bet2 + (1176 gwei * 10 ** 7), "Bettor2 should receive winnings");
+            assertEq(token.balanceOf(cfg.ADDR_BETOOR_2), bettor2_balance_before - bet2 + bettor_share, "Bettor2 should receive winnings");
         }
 
         // Marketing should always receive its share
+        assertEq(token.balanceOf(cfg.ADDR_MARKETING), marketing_balance_before + rev, "(Static value check) Marketing should receive fee");
         assertEq(token.balanceOf(cfg.ADDR_MARKETING), marketing_balance_before + marketing_share, "Marketing should receive fee");
+
+        // contract balance should be the same as before the game
+        uint256 epsilon = (5 wei * 2) + 1 wei;
+        assertLt(token.balanceOf(address(game)), game_contract_balance_before + epsilon, "Contract balance should be the same (within epsilon)");
     }
 
     // Test revenue sharing
