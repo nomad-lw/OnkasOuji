@@ -462,4 +462,27 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             }
         }
     }
+
+    function recover_erc20(address token) external onlyOwner {
+        if (token == address(TOKEN_CONTRACT)) {
+            uint256 balance = TOKEN_CONTRACT.balanceOf(address(this));
+            STL.safeTransfer(address(TOKEN_CONTRACT), msg.sender, balance);
+        } else {
+            try IERC20(token).balanceOf(address(this)) returns (uint256 balance) {
+                if (balance > 0) {
+                    STL.safeTransfer(token, msg.sender, balance);
+                }
+            } catch {
+                emit TokenNotSupported(token, "Not an ERC20");
+            }
+        }
+    }
+
+    function recover_erc721(address token, uint256 token_id) external onlyOwner {
+        try IERC721(token).ownerOf(token_id) {
+            IERC721(token).safeTransferFrom(address(this), msg.sender, token_id);
+        } catch {
+            emit TokenNotSupported(token, "Not an ERC721 or invalid token ID");
+        }
+    }
 }
