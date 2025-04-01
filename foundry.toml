@@ -17,15 +17,11 @@ optimizer_runs = 200
 sparse_mode = true
 # details = { yul = true, }
 # yul = true
-ffi = true
-# testing
-verbosity = 3
-# match-path = "ARB/test/unit/"
-# skip=[".t.sol",'.sol']
 
-# ??
-# [profile.default.model_checker]
-# contracts = { check_storage = true, }
+
+# testing
+ffi = true
+verbosity = 3
 
 # CI
 [profile.ci]

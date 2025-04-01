@@ -42,7 +42,7 @@ contract TestableWyrd is Wyrd, ITestableWyrd {
         _vrf_tester = new VRFTestData();
     }
 
-    function vrf_tester() public returns (VRFTestData) {
+    function vrf_tester() public view returns (VRFTestData) {
         return _vrf_tester;
     }
 
@@ -83,7 +83,7 @@ contract TestableOnkasOujiGame is ITestableWyrd, OnkasOujiGame {
         _vrf_tester = new VRFTestData();
     }
 
-    function vrf_tester() public returns (VRFTestData) {
+    function vrf_tester() public view returns (VRFTestData) {
         return _vrf_tester;
     }
 
@@ -222,6 +222,7 @@ abstract contract WyrdTestHelpers is Test {
         uint256[4] memory V
     ) internal {
         uint256[2] memory decoded_pk = twyrd.vrf_tester().decodePoint(pub);
+        console.log("Decoded PK:", decoded_pk[0], decoded_pk[1]);
         assertEq(decoded_pk[0], pk[0]);
         assertEq(decoded_pk[1], pk[1]);
 
@@ -689,7 +690,7 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
         player_winning = player_winning - rev_game;
         bet_winning = bet_winning - rev_bets;
 
-        (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
+        (,, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
 
         p_win_share = player_winning;
 
@@ -767,7 +768,7 @@ abstract contract OnkasOujiGameTestHelpers is WyrdTestHelpers {
             expected_betpool[bets[i].side ? 2 : 1] += bets[i].amount;
             verify_bet_pool_state(game_id, expected_betpool[0], expected_betpool[1], expected_betpool[2]);
         }
-        (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
+        (,, uint256 p1_depth, uint256 p2_depth) = game.calc_book(game_id);
         assertEq(p1_depth, expected_betpool[1], "Player1 depth mismatch");
         assertEq(p2_depth, expected_betpool[2], "Player2 depth mismatch");
 

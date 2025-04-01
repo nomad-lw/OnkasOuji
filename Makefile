@@ -17,21 +17,22 @@ test:
 	@rm vrf_proof*.json -v
 
 deploy-testnet: script/Deploy.s.sol
-	@forge script script/Deploy.s.sol:DeployScript \
+	@echo "Deploying Contracts to Sanko Testnet..."
+	@DEPLOY_MAINNET=false forge script script/Deploy.s.sol:DeployScript \
 		--rpc-url ${TESTNET_RPC_URL} \
 		--verifier blockscout \
-        --verifier-url 'https://sanko-arb-sepolia.explorer.caldera.xyz/api/' \
+        --verifier-url ${TESTNET_VERIFIER_URL} \
 		--broadcast \
 		--verify \
 		-vvvv\
-		--no-cache
+		# --no-cache
 
 deploy: script/Deploy.s.sol
 	@forge script script/Deploy.s.sol:DeployScript \
 		--rpc-url ${MAINNET_RPC_URL} \
 		--broadcast \
 		-vvvv\
-		--no-cache
+		# --no-cache
 
 setup-testnet: script/Setup.s.sol
 	@forge script script/Setup.s.sol:SetupScript \

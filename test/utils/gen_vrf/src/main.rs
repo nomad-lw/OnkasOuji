@@ -7,7 +7,6 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
-use std::io::ErrorKind;
 use std::io::Write;
 use vrf::openssl::Error as OpenSSLError;
 use vrf::openssl::{CipherSuite, ECVRF};

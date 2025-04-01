@@ -11,9 +11,6 @@ contract VRFTestData is Test {
 
     bytes32 public immutable SECRET_KEY;
 
-    // uint256 public constant PUBLIC_KEY_X = 20149468923017862635785269351026469201343513335253737999994330121872194856517;
-    // uint256 public constant PUBLIC_KEY_Y = 45558802482409728232371975206855032011893935284936184167394243449917294149765;
-
     struct VrfDatai {
         bytes32 hash;
         bytes32 message;
@@ -36,13 +33,13 @@ contract VRFTestData is Test {
         console.logBytes32(SECRET_KEY);
     }
 
-    function get_public_key_as_point() public pure returns (uint256[2] memory) {
-        uint256[2] memory PUBLIC_KEY_XY = [
-            uint256(20149468923017862635785269351026469201343513335253737999994330121872194856517),
-            uint256(45558802482409728232371975206855032011893935284936184167394243449917294149765)
-        ];
-        return PUBLIC_KEY_XY;
-    }
+    // function get_public_key_as_point() public pure returns (uint256[2] memory) {
+    //     uint256[2] memory PUBLIC_KEY_XY = [
+    //         uint256(20149468923017862635785269351026469201343513335253737999994330121872194856517),
+    //         uint256(45558802482409728232371975206855032011893935284936184167394243449917294149765)
+    //     ];
+    //     return PUBLIC_KEY_XY;
+    // }
 
     function decodeProof(bytes memory _proof) public pure returns (uint256[4] memory) {
         return VRF.decodeProof(_proof);
