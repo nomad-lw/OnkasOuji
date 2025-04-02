@@ -177,7 +177,7 @@ contract VRFTestData is Test {
         console.log("Revised length of message (alpha):", alpha.length);
         string[] memory inputs = new string[](8);
         string memory output_file_suffix = vm.toString(vm.unixTime());
-        inputs[0] = "test/utils/gen_vrf/target/debug/gen_vrf";
+        inputs[0] = "lib/vrf-gen/target/debug/vrf-gen";
         inputs[1] = "-o";
         inputs[2] = "prove";
         inputs[3] = "-m";
