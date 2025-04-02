@@ -172,17 +172,17 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
         return _bps_revenue;
     }
 
-    function compute_alpha(uint256 game_id) public view returns (bytes32) {
-        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
-        return compute_alpha(game_id, _games[game_id]);
-    }
-
-    function compute_alpha(uint256 game_id, GameData storage game) internal view returns (bytes32) {
-        return game.alpha_prefix ^ bytes32(uint256(uint160(game.players[0].addr) ^ uint160(game.players[1].addr)) ^ game_id);
-    }
-
     function get_alpha(uint256 game_id) public view override returns (bytes32) {
         return compute_alpha(game_id);
+    }
+
+    function compute_alpha(uint256 game_id) public view returns (bytes32) {
+        if (game_id == 0 || game_id > _current_game_id) revert InvalidGameID();
+        return _compute_alpha(game_id, _games[game_id]);
+    }
+
+    function _compute_alpha(uint256 game_id, GameData storage game) internal view returns (bytes32) {
+        return game.alpha_prefix ^ bytes32(uint256(uint160(game.players[0].addr) ^ uint160(game.players[1].addr)) ^ game_id);
     }
 
     /**
@@ -291,7 +291,7 @@ contract OnkasOujiGame is IOnkasOujiGame, Wyrd {
             revert InsufficientFee(msg.value, request_fee);
         }
         game.status = GameStatus.ACTIVE;
-        _request_random(game_id, compute_alpha(game_id, game));
+        _request_random(game_id, _compute_alpha(game_id, game));
 
         emit GameStarted(game_id);
     }

@@ -43,12 +43,3 @@ struct OnkaStats {
     uint256 wins;
     uint256 losses;
 }
-
-enum TestGameTypes {
-    STANDARD,
-    NO_SPECULATION,
-    TWO_SPECULATIONS,
-    ABORT_NO_SPECULATION,
-    ABORT_WITH_SPECULATION,
-    NO_APPROVAL
-}

@@ -12,7 +12,10 @@ interface IOnkasOujiGame is IWyrd {
     // event GameCompleted(uint256 indexed game_id, uint8 indexed winner, RoundResult[] rounds);
     // event GameAborted(uint256 indexed game_id);
     // event BetPlaced(uint256 indexed game_id, address indexed addr, bool indexed prediction, uint256 amount);
+    // event CallbackOnInactiveGame(uint256 indexed game_id, GameStatus indexed status);
     // event UserRegistered(bytes32 indexed secret, address indexed addr);
+    // event TokenNotSupported(address indexed token, string reason);
+    // event RevenueSet(uint256 indexed bps);
 
     // === View Functions ===
     function get_current_game_id() external view returns (uint256);
@@ -21,14 +24,19 @@ interface IOnkasOujiGame is IWyrd {
     function get_speculations(uint256 game_id) external view returns (Speculation[] memory);
     function get_onka_stats(uint256 nft_id) external view returns (OnkaStats memory);
     function calc_book(uint256 game_id) external view returns (uint256 p1_odds, uint256 p2_odds, uint256 p1_depth, uint256 p2_depth);
+    function get_revenue_bps() external view returns (uint256);
+    function compute_alpha(uint256 game_id) external view returns (bytes32);
 
     // === External Functions ===
     function register(bytes32 secret) external;
     function new_game(Player[2] memory players, uint256 amount, bytes32 alpha_prefix) external payable returns (uint256);
     function place_bet(uint256 game_id, address speculator, bool prediction, uint256 amount) external;
     function start_game(uint256 game_id) external payable;
+    function exec_game(uint256 game_id) external;
     function end_game(uint256 game_id) external;
     function abort_game(uint256 game_id) external;
     function set_revenue_address(address addr) external;
     function set_revenue(uint256 bps) external;
+    function recover_erc20(address token) external;
+    function recover_erc721(address token, uint256 token_id) external;
 }

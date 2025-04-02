@@ -9,6 +9,7 @@ interface IWyrd {
     // event RequestAborted(uint256 indexed req_id);
     // event CallbackOnInactiveRequest(uint256 indexed req_id, uint8 indexed flag, uint256 sequence_number);
     // event RandomnessSourcesUpdated(uint8 old_sources, uint8 new_sources);
+    // event SAVPublicKeyUpdated(uint256[2] newPublicKey);
 
     /* ▀▀▀ View/Pure Functions ▀▀▀ */
     function calc_fee() external view returns (uint256 total_fee, uint128 pyth_fee, uint256 randomizer_fee);
