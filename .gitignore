@@ -17,7 +17,7 @@ node_modules
 
 # Temporary files
 _*.sol
-**/vrf_proof.json
+**/vrf_proof*.json
 
 # Rust
 **/target/

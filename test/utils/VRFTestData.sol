@@ -165,19 +165,13 @@ contract VRFTestData is Test {
         )
     {
         console.log("Length of message (alpha):", alpha.length);
-        // alpha = zero_pad_b32(alpha);
-        // string memory encoded_alpha = bytes_to_hex_string(alpha);
-        // assertEq(encoded_alpha, Strings.toHexStringNoPrefix(alpha));
-        // string memory encoded_alpha = Strings.toHexStringNoPrefix(alpha);
-        string memory encoded_alpha = Strings.toHexString(uint256(alpha), 32);
-
         console.log("alpha:");
         console.logBytes32(alpha);
 
-        console.log("Revised length of message (alpha):", alpha.length);
         string[] memory inputs = new string[](8);
+        string memory encoded_alpha = Strings.toHexString(uint256(alpha), 32);
         string memory output_file_suffix = vm.toString(vm.unixTime());
-        inputs[0] = "lib/vrf-gen/target/debug/vrf-gen";
+        inputs[0] = "lib/vrf-gen/target/debug/gen_vrf";
         inputs[1] = "-o";
         inputs[2] = "prove";
         inputs[3] = "-m";
@@ -185,14 +179,12 @@ contract VRFTestData is Test {
         inputs[5] = "--silent";
         inputs[6] = "--json";
         inputs[7] = output_file_suffix;
-        // inputs[6] = "--soft";
         console.log("Encoded alpha:", encoded_alpha);
 
         bytes memory res = vm.ffi(inputs);
         console.log("res:", string(res));
         assertEq(string(res), "Ok");
         VrfData memory vrf_data = load_vrf_proof(false, output_file_suffix);
-        // VrfData memory vrf_data = parse_vrf_json(string(res));
         assertEq(bytes32(vrf_data.message), alpha);
 
         pk = VRF.decodePoint(vrf_data.public_key);
@@ -225,7 +217,6 @@ contract VRFTestData is Test {
 
     function get_pk() public returns (uint256[2] memory) {
         (,,,,,, bytes memory public_key) = generate_vrf_proof(bytes32(hex"1337"));
-        // VrfData memory vrf_data = load_vrf_proof(true);
         return VRF.decodePoint(public_key);
     }
 
